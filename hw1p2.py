@@ -127,7 +127,7 @@ def train_epoch(data_loader, training_model, training_optimizer, loss_function):
     for i, (batch_x, batch_y) in enumerate(data_loader):
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
-        training_optimizer.zero_grad()
+        training_optimizer.zero_grad(set_to_none=True)
         out = training_model(batch_x)
         train_loss = loss_function(out, batch_y)
         train_loss.backward()
@@ -192,7 +192,7 @@ if __name__ == "__main__":
 
     input_dimension = (1 + 2 * current_context_size) * 40
     output_dimension = 71
-    size = [input_dimension, 256, 512, 1024, 512, 256, 128, output_dimension]
+    size = [input_dimension, 128, 256, 512, 1024, 512, 256, 128, output_dimension]
 
     training_data = HW1DataSet(train_x, train_y, context_size=current_context_size)
 
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     test_data = HW1TestDataSet(test_x, context_size=current_context_size)
 
     data_loader_args = dict(shuffle=True, batch_size=512, drop_last=True, collate_fn=HW1DataSet.collate_fn,
-                            pin_memory=True)
+                            pin_memory=True, num_workers=8)
 
     training_data_loader = torch.utils.data.DataLoader(training_data, **data_loader_args)
 
@@ -216,10 +216,10 @@ if __name__ == "__main__":
 
     loss = torch.nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.05, momentum=0.9, nesterov=True)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=2, min_lr=0.001, factor=0.5)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.04, momentum=0.9, nesterov=True)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=0, min_lr=0.001, factor=0.5)
 
-    epochs = 20
+    epochs = 10
     # We are going to adjust the learning rate every epoch
     # accroding the validation error.
     for epoch in range(epochs):
