@@ -216,7 +216,7 @@ if __name__ == "__main__":
 
     loss = torch.nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.04, momentum=0.9, nesterov=True)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, nesterov=True)
     scheduler = ReduceLROnPlateau(optimizer, 'min', patience=0, min_lr=0.001, factor=0.5)
 
     epochs = 10
