@@ -110,7 +110,7 @@ class HW1TestDataSet(torch.utils.data.Dataset):
 
 # Using a MLP training_model
 class MLP(torch.nn.Module):
-    def __init__(self, sizes):
+    def __init__(self, sizes, ndropout=0, nbatchnorm=0, dropout_p = 0.5):
         super().__init__()
         layers = []
         for i in range(len(sizes) - 1):
@@ -119,7 +119,10 @@ class MLP(torch.nn.Module):
             layers.append(torch.nn.Linear(in_size, out_size))
             if i != len(sizes):
                 layers.append(torch.nn.ReLU())
+            if i < nbatchnorm:
                 layers.append(torch.nn.BatchNorm1d(out_size))
+            if i < nbatchnorm + ndropout:
+                layers.append(torch.nn.Dropout(p=dropout_p))
         self.model = torch.nn.Sequential(*layers)
 
     def forward(self, x):
@@ -226,7 +229,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, nesterov=True)
     scheduler = ReduceLROnPlateau(optimizer, 'min', patience=0, min_lr=0.001, factor=0.1)
 
-    epochs = 10
+    epochs = 90
     # We are going to adjust the learning rate every epoch
     # accroding the validation error.
     for epoch in range(epochs):
