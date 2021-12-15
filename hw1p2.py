@@ -6,6 +6,7 @@ from torch.optim.lr_scheduler import  ReduceLROnPlateau
 
 
 MODE = "COMPLETE"
+DATA = "FINAL"    # Whether we combine training and validation data together
 device = torch.device("cuda")
 current_context_size = 30
 
@@ -27,6 +28,12 @@ def get_data(mode):
         val_y = np.load("toy_dataset/toy_val_label.npy", allow_pickle=True)
 
         testing_x = np.load("toy_dataset/toy_test_data.npy", allow_pickle=True)
+
+    # Once we finish parameter tuning, we want to
+    # get the most out of the data we have.
+    if DATA == "FINAL":
+        training_x = np.concatenate((training_x, val_x))
+        training_y = np.concatenate((training_y, val_y))
 
     return training_x, training_y, val_x, val_y, testing_x
 
@@ -217,7 +224,7 @@ if __name__ == "__main__":
     loss = torch.nn.CrossEntropyLoss()
 
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, nesterov=True)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=0, min_lr=0.001, factor=0.5)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=0, min_lr=0.001, factor=0.1)
 
     epochs = 10
     # We are going to adjust the learning rate every epoch
