@@ -202,7 +202,7 @@ if __name__ == "__main__":
 
     input_dimension = (1 + 2 * current_context_size) * 40
     output_dimension = 71
-    size = [input_dimension, 128, 256, 512, 1024, 512, 256, 128, output_dimension]
+    size = [input_dimension, 4096, 4096, 4096, 4096, 4096, 4096, 4096, output_dimension]
 
     training_data = HW1DataSet(train_x, train_y, context_size=current_context_size)
 
@@ -210,7 +210,7 @@ if __name__ == "__main__":
 
     test_data = HW1TestDataSet(test_x, context_size=current_context_size)
 
-    data_loader_args = dict(shuffle=True, batch_size=512, drop_last=True, collate_fn=HW1DataSet.collate_fn,
+    data_loader_args = dict(shuffle=True, batch_size=8192, drop_last=True, collate_fn=HW1DataSet.collate_fn,
                             pin_memory=True, num_workers=8)
 
     training_data_loader = torch.utils.data.DataLoader(training_data, **data_loader_args)
@@ -221,13 +221,13 @@ if __name__ == "__main__":
     test_data_loader = torch.utils.data.DataLoader(test_data, shuffle=False, batch_size=4096,
                                                    collate_fn=HW1TestDataSet.collate_fn)
 
-    model = MLP(size)
+    model = MLP(size, ndropout=7, dropout_p=0.5)
     model.to(device)
 
     loss = torch.nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, nesterov=True)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=0, min_lr=0.001, factor=0.1)
+    optimizer = torch.optim.Adam(model.parameters(), 0.0001)
+    # scheduler = ReduceLROnPlateau(optimizer, 'min', patience=0, min_lr=0.001, factor=0.1)
 
     epochs = 90
     # We are going to adjust the learning rate every epoch
@@ -239,10 +239,12 @@ if __name__ == "__main__":
 
         # Validation
         val_acc, val_loss = evaluate_epoch(validation_data_loader, model, loss)
-        scheduler.step(val_loss)
+        # scheduler.step(val_loss)
         # Print log of accuracy and loss_function
         print("Epoch: " + str(epoch) + ", Training loss_function: " + str(training_loss) + ", Validation loss_function:" + str(val_loss) +
               ", Validation accuracy:" + str(val_acc * 100) + "%")
+        if epoch % 10 == 9:
+            torch.save(model.state_dict(), f"model_{epoch}")
 
     # Predict labels in the test set
     ps = predict(test_data_loader, model)
