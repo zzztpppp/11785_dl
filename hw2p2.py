@@ -1,6 +1,7 @@
 import os
 import torch
 import torchvision
+import torch.nn.functional as nf
 import numpy as np
 from torch import nn
 from torch.utils.data import DataLoader
@@ -15,6 +16,7 @@ training_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "tr
 validation_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "val_data"),
                                                    transform=torchvision.transforms.ToTensor())
 # test_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "test_data"))
+device = torch.device("cuda")
 
 # For the verification task
 verification_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "verification_data"))
@@ -37,6 +39,94 @@ class SimpleResNetBlock(nn.Module):
         out = self.conv(x)
         out = self.bn(out)
         return self.relu(out + self.shortcut(x))
+
+
+class ResidualBlock(nn.Module):
+    """
+    A size customizable residual block from recitation slides.
+    """
+    def __init__(self, input_channels, output_channels, kernel_size, convolutional_shortcut=False):
+        super(ResidualBlock, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(input_channels, output_channels, kernel_size, stride=1, padding=(kernel_size - 1) // 2),
+            nn.BatchNorm2d(output_channels),
+            nn.ReLU(),
+            nn.Conv2d(output_channels, output_channels, kernel_size, stride=1, padding=(kernel_size - 1) // 2),
+            nn.BatchNorm2d(output_channels),
+        )
+        # Keep the input size and output size match
+        if convolutional_shortcut:
+            self.shortcut = nn.Conv2d(input_channels, output_channels, kernel_size=1)
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x):
+        out = self.layers(x)
+        shortcut = self.shortcut(x)
+        return nf.relu(out + shortcut)
+
+
+class ResNet18(nn.Module):
+    """
+    An 18-layer ResNet from recitation slides.
+    """
+    def __init__(self, n_classes):
+        super(ResNet18, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(3, 64, 7, 2),  # (64, 30, 30)
+            nn.MaxPool2d(3, 2),      # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 128, 3, True),  # (128, 14, 14)
+            ResidualBlock(128, 128, 3),  # (128, 14, 14)
+            ResidualBlock(128, 256, 3, True),  # (256, 14, 14)
+            ResidualBlock(256, 256, 3),  # (256, 14, 14)
+            ResidualBlock(256, 512, 3, True),  # (512, 14, 14)
+            ResidualBlock(512, 512, 3),  # (512, 14, 14)
+            nn.AdaptiveAvgPool2d((1, 1)),  # (512, 1, 1)
+            nn.Flatten(),
+            nn.Linear(512, 4096),
+            nn.ReLU(),
+            nn.Linear(4096, n_classes)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class ResNet34(nn.Module):
+
+    def __init__(self, n_classes):
+        super(ResNet34, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(3, 64, 7, 2),  # (64, 30, 30)
+            nn.MaxPool2d(3, 2),      # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 128, 3, True),  # (128, 14, 14)
+            ResidualBlock(128, 128, 3),  # (128, 14, 14)
+            ResidualBlock(128, 128, 3),  # (128, 14, 14)
+            ResidualBlock(128, 128, 3),  # (128, 14, 14)
+            ResidualBlock(128, 256, 3, True),  # (256, 14, 14)
+            ResidualBlock(256, 256, 3),  # (256, 14, 14)
+            ResidualBlock(256, 256, 3),  # (256, 14, 14)
+            ResidualBlock(256, 256, 3),  # (256, 14, 14)
+            ResidualBlock(256, 256, 3),  # (256, 14, 14)
+            ResidualBlock(256, 256, 3),  # (256, 14, 14)
+            ResidualBlock(256, 512, 3, True),  # (512, 14, 14)
+            ResidualBlock(512, 512, 3),  # (512, 14, 14)
+            ResidualBlock(512, 512, 3),  # (512, 14, 14)
+            nn.AdaptiveAvgPool2d((1, 1)),  # (512, 1, 1)
+            nn.Flatten(),
+            nn.Linear(512, 1000),
+            nn.ReLU(),
+            nn.BatchNorm1d(1000),
+            nn.Linear(1000, n_classes)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
 
 
 # Construct model for the training process
@@ -68,39 +158,81 @@ class ClassificationNetwork(torch.nn.Module):
         return output
 
 
-def train(training_set, val_set, train_model: nn.Module, criterion, n_epochs, lr, weight_decay):
-    train_dataloader = DataLoader(training_set, batch_size=128, shuffle=True, pin_memory=True)
-    val_dataloader = DataLoader(val_set, batch_size=len(val_set), shuffle=False, pin_memory=True)
+class ConvNetClassifier1(nn.Module):
+    def __init__(self, n_classes):
+        super(ConvNetClassifier1, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(3, 32, 3, 1, padding=1),  # (32, 64, 64)
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # (32, 32, 32)
+            nn.Conv2d(32, 32, 3, 1),  # (32, 30, 30)
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # (32, 15, 15)
+            nn.Conv2d(32, 128, 5, 1),  # (128, 11, 11)
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),  # (128, 5, 5)
+            nn.Flatten(),   # (128 * 5 * 5)
+            nn.Linear(128 * 5 * 5, 4096),
+            nn.ReLU(),
+            # nn.Dropout(p=0.5),
+            nn.Linear(4096, 4096),
+            nn.ReLU(),
+            # nn.Dropout(p=0.5),
+            nn.Linear(4096, n_classes)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+def train(training_set, val_set, model: nn.Module, criterion, n_epochs, lr, weight_decay):
+    train_dataloader = DataLoader(training_set, batch_size=256, shuffle=True, pin_memory=True, num_workers=8)
+    val_dataloader = DataLoader(val_set, batch_size=1024, shuffle=False, pin_memory=True, num_workers=8)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9, nesterov=True)
+    model.to(device)
     for e in range(n_epochs):
         model.train()
         avg_loss = 0.0
         for batch_num, (x, y) in enumerate(train_dataloader):
-            optimizer.zero_grad(set_to_none=True)
+            x = x.to(device)
+            y = y.to(device)
+            # When use optimizer.zero_grad(set_to_none=True), the loss doesn't decrease at all, why?
+            optimizer.zero_grad()
             outputs = model(x)
-            loss = criterion(outputs, y)
+            loss = criterion(outputs, y.long())
             loss.backward()
             optimizer.step()
 
             avg_loss += loss.item()
-            if batch_num % 10 == 9:
+            if batch_num % 100 == 99:
                 print(f"Epoch: {e}, batch: {batch_num}, training_loss: {avg_loss / 10}")
                 avg_loss = 0.0
 
         # Validation per epoch
-        train_model.eval()
+        model.eval()
         truth = []
         predictions = []
         for batch_num, (x, y) in enumerate(val_dataloader):
-            outputs = model(x).numpy()
+            x = x.to(device)
+            outputs = model(x).detach().cpu().numpy()
             truth.append(y.numpy())
             predictions.append(outputs.argmax(axis=1))
         print(f"Validation accuracy at epoch {e}: {accuracy_score(np.concatenate(truth), np.concatenate(predictions))}")
 
+    return model
 
-if __name__ == "__main__":
+
+def run_train():
     n_classes = len(training_data.classes)
     training_criterion = nn.CrossEntropyLoss()
-    model = ClassificationNetwork(3, n_classes, 32)
-    n_epochs = 10
-    train(training_data, validation_data, model, training_criterion, n_epochs, lr=0.1, weight_decay=1e-3)
+    # model = ClassificationNetwork(3, n_classes, 32)
+    # model = ConvNetClassifier1(n_classes)    # Best validation score 0.26
+    # model = ResNet18(n_classes)
+    model = ResNet34(n_classes)
+    n_epochs = 1000
+    trained_model = train(training_data, validation_data, model, training_criterion, n_epochs, lr=0.1, weight_decay=1e-3)
+    torch.save(trained_model.state_dict(), "saved_model")
+
+
+if __name__ == "__main__":
+    run_train()
