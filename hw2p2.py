@@ -46,18 +46,21 @@ class ResidualBlock(nn.Module):
     """
     A size customizable residual block from recitation slides.
     """
-    def __init__(self, input_channels, output_channels, kernel_size, convolutional_shortcut=False):
+    def __init__(self, input_channels, output_channels, kernel_size, stride=1):
         super(ResidualBlock, self).__init__()
         self.layers = nn.Sequential(
-            nn.Conv2d(input_channels, output_channels, kernel_size, stride=1, padding=(kernel_size - 1) // 2),
+            nn.Conv2d(input_channels, output_channels, kernel_size, stride=stride, padding=(kernel_size - 1) // 2),
             nn.BatchNorm2d(output_channels),
             nn.ReLU(),
             nn.Conv2d(output_channels, output_channels, kernel_size, stride=1, padding=(kernel_size - 1) // 2),
             nn.BatchNorm2d(output_channels),
         )
         # Keep the input size and output size match
-        if convolutional_shortcut:
-            self.shortcut = nn.Conv2d(input_channels, output_channels, kernel_size=1)
+        if stride != 1 or input_channels != output_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(input_channels, output_channels, kernel_size=(1, 1), stride=(stride, stride)),
+                nn.BatchNorm2d(output_channels)
+            )
         else:
             self.shortcut = nn.Identity()
 
@@ -71,7 +74,7 @@ class ResidualBlock3(nn.Module):
     """
     A resnet has 3 internal conv layers
     """
-    def __init__(self, input_channels, output_channels, kernel_size, convolutional_shortcut=False):
+    def __init__(self, input_channels, output_channels, kernel_size, stride=1):
         super(ResidualBlock3, self).__init__()
         self.layers = nn.Sequential(
             nn.Conv2d(input_channels, output_channels // 4, kernel_size=1, stride=1),
@@ -84,10 +87,8 @@ class ResidualBlock3(nn.Module):
             nn.Conv2d(output_channels // 4, output_channels, kernel_size=1, stride=1)
         )
 
-        if convolutional_shortcut:
-            self.shortcut = nn.Conv2d(input_channels, output_channels, kernel_size=1, stride=1)
-        else:
-            self.shortcut = nn.Identity()
+        if stride != 1 or input_channels != output_channels:
+            pass
 
     def forward(self, x):
         out = self.layers(x)
@@ -101,20 +102,20 @@ class ResNet50(nn.Module):
         self.layers = nn.Sequential(
             nn.Conv2d(3, 64, 7, 2),  # (64, 30, 30)
             nn.MaxPool2d(3, 2),  # (64, 14, 14)
-            ResidualBlock3(64, 256, 3, True), # (256, 14, 14)
+            ResidualBlock3(64, 256, 3), # (256, 14, 14)
             ResidualBlock3(256, 256, 3),  # (256, 14, 14)
             ResidualBlock3(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock3(256, 512, 3, True),  # (512, 14, 14)
+            ResidualBlock3(256, 512, 3, 2),  # (512, 14, 14)
             ResidualBlock3(512, 512, 3),  # (512, 14, 14)
             ResidualBlock3(512, 512, 3),  # (512, 14, 14)
             ResidualBlock3(512, 512, 3),  # (512, 14, 14)
-            ResidualBlock3(512, 1024, 3, True),  # (1024, 14, 14)
+            ResidualBlock3(512, 1024, 3, 2),  # (1024, 14, 14)
             ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
             ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
             ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
             ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
             ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
-            ResidualBlock3(1024, 2048, 3, True),  # (2048, 14, 14)
+            ResidualBlock3(1024, 2048, 3, 2),  # (2048, 14, 14)
             ResidualBlock3(2048, 2048, 3),  # (2048, 14, 14)
             ResidualBlock3(2048, 2048, 3),  # (2048, 14, 14)
             nn.AdaptiveAvgPool2d((1, 1)),  #(2048, 1, 1)
@@ -162,24 +163,24 @@ class ResNet34(nn.Module):
     def __init__(self, n_classes):
         super(ResNet34, self).__init__()
         self.layers = nn.Sequential(
-            nn.Conv2d(3, 64, 7, 2),  # (64, 30, 30)
+            nn.Conv2d(3, 64, 7, 2, padding=6),  # (64, 30, 30)
             nn.MaxPool2d(3, 2),      # (64, 14, 14)
             ResidualBlock(64, 64, 3),  # (64, 14, 14)
             ResidualBlock(64, 64, 3),  # (64, 14, 14)
             ResidualBlock(64, 64, 3),  # (64, 14, 14)
-            ResidualBlock(64, 128, 3, True),  # (128, 14, 14)
-            ResidualBlock(128, 128, 3),  # (128, 14, 14)
-            ResidualBlock(128, 128, 3),  # (128, 14, 14)
-            ResidualBlock(128, 128, 3),  # (128, 14, 14)
-            ResidualBlock(128, 256, 3, True),  # (256, 14, 14)
-            ResidualBlock(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock(256, 512, 3, True),  # (512, 14, 14)
-            ResidualBlock(512, 512, 3),  # (512, 14, 14)
-            ResidualBlock(512, 512, 3),  # (512, 14, 14)
+            ResidualBlock(64, 128, 3, 2),  # (128, 7, 7)
+            ResidualBlock(128, 128, 3),  # (128, 7, 7)
+            ResidualBlock(128, 128, 3),  # (128, 7, 7)
+            ResidualBlock(128, 128, 3),  # (128, 7, 7)
+            ResidualBlock(128, 256, 3, 2),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 512, 3, 2),  # (512, 1, 1)
+            ResidualBlock(512, 512, 3),  # (512, 1, 1)
+            ResidualBlock(512, 512, 3),  # (512, 1, 1)
             nn.AdaptiveAvgPool2d((1, 1)),  # (512, 1, 1)
             nn.Flatten(),
             nn.Linear(512, 1000),
@@ -190,6 +191,41 @@ class ResNet34(nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+
+class ResNet34NoDownSample(nn.Module):
+    def __init__(self, n_classes):
+        super(ResNet34NoDownSample, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(3, 64, 7, 2),  # (64, 30, 30)
+            nn.MaxPool2d(3, 2),      # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 64, 3),  # (64, 14, 14)
+            ResidualBlock(64, 128, 3),  # (128, 7, 7)
+            ResidualBlock(128, 128, 3),  # (128, 7, 7)
+            ResidualBlock(128, 128, 3),  # (128, 7, 7)
+            ResidualBlock(128, 128, 3),  # (128, 7, 7)
+            ResidualBlock(128, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 256, 3),  # (256, 3, 3)
+            ResidualBlock(256, 512, 3),  # (512, 1, 1)
+            ResidualBlock(512, 512, 3),  # (512, 1, 1)
+            ResidualBlock(512, 512, 3),  # (512, 1, 1)
+            nn.AdaptiveAvgPool2d((1, 1)),  # (512, 1, 1)
+            nn.Flatten(),
+            nn.Linear(512, 1000),
+            nn.ReLU(),
+            nn.BatchNorm1d(1000),
+            nn.Linear(1000, n_classes)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
 
 
 # Construct model for the training process
@@ -299,17 +335,17 @@ def eval(model, test_data):
         pass
 
 
-
 def run_train():
     n_classes = len(training_data.classes)
     training_criterion = nn.CrossEntropyLoss()
     # model = ClassificationNetwork(3, n_classes, 32)
     # model = ConvNetClassifier1(n_classes)    # Best validation score 0.26
     # model = ResNet18(n_classes)    # Best validation score 0.6
-    # model = ResNet34(n_classes)    # Best validation score is 0.79 around epoch 20
-    model = ResNet50(n_classes)
-    n_epochs = 20
-    trained_model = train(training_data, validation_data, model, training_criterion, n_epochs, lr=0.1, weight_decay=1e-3)
+    # model = ResNet34(n_classes)    # Best validation score is 0.59 around epoch 20 with weight decay 1e-5
+    # model = ResNet34NoDownSample(n_classes) # 0.7 with weight decay 1e-5
+    # model = ResNet50(n_classes)
+    n_epochs = 25
+    trained_model = train(training_data, validation_data, model, training_criterion, n_epochs, lr=0.1, weight_decay=1e-5)
     torch.save(trained_model.state_dict(), "saved_model")
 
 
