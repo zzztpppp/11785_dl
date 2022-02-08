@@ -5,11 +5,11 @@ from math import ceil
 base_model = [
     # expand_ratio, channels, repeats, stride, kernel_size
     [1, 16, 1, 1, 3],
-    [6, 24, 2, 2, 3],
-    [6, 40, 2, 2, 5],
-    [6, 80, 3, 2, 3],
+    [6, 24, 2, 1, 3],
+    [6, 40, 2, 1, 5],
+    [6, 80, 3, 1, 3],
     [6, 112, 3, 1, 5],
-    [6, 192, 4, 2, 5],
+    [6, 192, 4, 1, 5],
     [6, 320, 1, 1, 3],
 ]
 
@@ -58,6 +58,7 @@ class SqueezeExcitation(nn.Module):
 
     def forward(self, x):
         return x * self.se(x)
+
 
 class InvertedResidualBlock(nn.Module):
     def __init__(
@@ -171,5 +172,3 @@ def test():
     ).to(device)
 
     print(model(x).shape) # (num_examples, num_classes)
-
-test()

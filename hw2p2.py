@@ -10,10 +10,20 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from PIL import Image
 from sklearn.metrics import accuracy_score
-from torchvision.transforms import ToTensor, RandomHorizontalFlip, RandomErasing, Compose, RandomPerspective
+from torchvision.transforms import (
+    ToTensor, RandomHorizontalFlip, RandomErasing, Compose, RandomPerspective,
+    Resize
+)
+from efficientnet import EfficientNet
 
-train_transforms = Compose([ToTensor(), RandomErasing(), RandomHorizontalFlip()])
-val_transforms = Compose([ToTensor()])
+
+torch.cuda.empty_cache()
+
+
+resizer = Resize((64, 64))
+train_transforms = Compose([ToTensor(), resizer, RandomErasing(), RandomHorizontalFlip()])
+val_transforms = Compose([ToTensor(), resizer])
+test_transforms = Compose([ToTensor(), resizer])
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.join(current_dir, "hw2p2_data")
@@ -50,6 +60,13 @@ class VerificationDataSet(torch.utils.data.Dataset):
         label = self.labels[index]
         return (image_1, image_2), label
 
+    @staticmethod
+    def collate_fn(batch):
+        batch_1 = torch.tensor(np.stack([x for (x, _), _ in batch])).float()
+        batch_2 = torch.tensor(np.stack([y for (_, y), _ in batch])).float()
+        batch_labels = torch.tensor(np.stack([label for (_, _), label in batch])).long()
+        return (batch_1, batch_2), batch_labels
+
 
 # For the classfication task
 training_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "train_data"),
@@ -58,12 +75,12 @@ validation_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "
                                                    transform=val_transforms)
 
 test_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "test_data"),
-                                             transform=torchvision.transforms.ToTensor())
+                                             transform=test_transforms)
 
 device = torch.device("cuda")
 
 # For the verification task
-verification_data = torchvision.datasets.ImageFolder(root=os.path.join(data_dir, "verification_data"))
+verification_data = VerificationDataSet(os.path.join(data_dir, "verification_pairs_val.txt"))
 
 
 class SimpleResNetBlock(nn.Module):
@@ -117,17 +134,18 @@ class ResidualBlock3(nn.Module):
     """
     A resnet has 3 internal conv layers
     """
-    def __init__(self, input_channels, output_channels, kernel_size, stride=1):
+    def __init__(self, input_channels, output_channels, stride=1):
         super(ResidualBlock3, self).__init__()
+        bottleneck_channels = output_channels // 4
         self.layers = nn.Sequential(
-            nn.Conv2d(input_channels, output_channels // 4, kernel_size=1, stride=1),
-            nn.BatchNorm2d(output_channels // 4),
+            nn.Conv2d(input_channels, bottleneck_channels, kernel_size=(1, 1), stride=(1, 1)),
+            nn.BatchNorm2d(bottleneck_channels),
             nn.ReLU(),
-            nn.Conv2d(output_channels // 4, output_channels // 4, kernel_size=kernel_size, stride=1,
-                      padding=(kernel_size - 1) // 2),
-            nn.BatchNorm2d(output_channels // 4),
+            nn.Conv2d(bottleneck_channels, bottleneck_channels, kernel_size=(3, 3), stride=(stride, stride),
+                      padding=(1, 1)),
+            nn.BatchNorm2d(bottleneck_channels),
             nn.ReLU(),
-            nn.Conv2d(output_channels // 4, output_channels, kernel_size=1, stride=1)
+            nn.Conv2d(bottleneck_channels, output_channels, kernel_size=(1, 1), stride=(1, 1))
         )
 
         if stride != 1 or input_channels != output_channels:
@@ -141,7 +159,7 @@ class ResidualBlock3(nn.Module):
     def forward(self, x):
         out = self.layers(x)
         shortcut = self.shortcut(x)
-        return nf.relu(out + shortcut)
+        return nf.relu(out + shortcut, inplace=True)
 
 
 class ResNet50(nn.Module):
@@ -150,22 +168,22 @@ class ResNet50(nn.Module):
         self.layers = nn.Sequential(
             nn.Conv2d(3, 64, 7, 2),  # (64, 30, 30)
             nn.MaxPool2d(3, 2),  # (64, 14, 14)
-            ResidualBlock3(64, 256, 3), # (256, 14, 14)
-            ResidualBlock3(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock3(256, 256, 3),  # (256, 14, 14)
-            ResidualBlock3(256, 512, 3, 2),  # (512, 14, 14)
-            ResidualBlock3(512, 512, 3),  # (512, 14, 14)
-            ResidualBlock3(512, 512, 3),  # (512, 14, 14)
-            ResidualBlock3(512, 512, 3),  # (512, 14, 14)
-            ResidualBlock3(512, 1024, 3, 2),  # (1024, 14, 14)
-            ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
-            ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
-            ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
-            ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
-            ResidualBlock3(1024, 1024, 3),  # (1024, 14, 14)
-            ResidualBlock3(1024, 2048, 3, 2),  # (2048, 14, 14)
-            ResidualBlock3(2048, 2048, 3),  # (2048, 14, 14)
-            ResidualBlock3(2048, 2048, 3),  # (2048, 14, 14)
+            ResidualBlock3(64, 256), # (256, 14, 14)
+            ResidualBlock3(256, 256),  # (256, 14, 14)
+            ResidualBlock3(256, 256),  # (256, 14, 14)
+            ResidualBlock3(256, 512, 2),  # (512, 14, 14)
+            ResidualBlock3(512, 512),  # (512, 14, 14)
+            ResidualBlock3(512, 512),  # (512, 14, 14)
+            ResidualBlock3(512, 512),  # (512, 14, 14)
+            ResidualBlock3(512, 1024, 2),  # (1024, 14, 14)
+            ResidualBlock3(1024, 1024),  # (1024, 14, 14)
+            ResidualBlock3(1024, 1024),  # (1024, 14, 14)
+            ResidualBlock3(1024, 1024),  # (1024, 14, 14)
+            ResidualBlock3(1024, 1024),  # (1024, 14, 14)
+            ResidualBlock3(1024, 1024),  # (1024, 14, 14)
+            ResidualBlock3(1024, 2048, 2),  # (2048, 14, 14)
+            ResidualBlock3(2048, 2048),  # (2048, 14, 14)
+            ResidualBlock3(2048, 2048),  # (2048, 14, 14)
             nn.AdaptiveAvgPool2d((1, 1)),  #(2048, 1, 1)
             nn.Flatten(),
             nn.Linear(2048, 1000),
@@ -208,7 +226,7 @@ class ResNet18(nn.Module):
 
 class ResNet34(nn.Module):
 
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, embedding_dims=64):
         super(ResNet34, self).__init__()
         self.layers = nn.Sequential(
             nn.Conv2d(3, 64, 7, 2, padding=6),  # (64, 30, 30)
@@ -234,11 +252,16 @@ class ResNet34(nn.Module):
             nn.Linear(512, 1000),
             nn.ReLU(),
             nn.BatchNorm1d(1000),
-            nn.Linear(1000, n_classes)
         )
+        self.class_out = nn.Linear(1000, n_classes)
+        self.embedding_out = nn.Linear(1000, embedding_dims)
 
-    def forward(self, x):
-        return self.layers(x)
+    def forward(self, x, return_embedding=False):
+        net_out = self.layers(x)
+        if return_embedding:
+            return self.class_out(net_out), nf.normalize(nf.relu(net_out))
+        else:
+            return self.class_out(net_out)
 
 
 class ResNet34NoDownSample(nn.Module):
@@ -460,12 +483,16 @@ def train_with_closeness(training_set, val_set, model, l_criterion, c_criterion,
                 print(f"Epoch: {e}, batch: {batch_num}, training_loss: {label_loss / 100}, center_loss: {center_loss / 100}")
                 center_loss = 0.0
                 label_loss = 0.0
+        val_accuracy, val_loss = validate(model, val_set, l_criterion)
+        similarity_loss = validate_closeness(model, verification_data, c_criterion)
+        scheduler_c.step(val_loss)
+        scheduler_l.step(similarity_loss)
 
-
+    return model
 
 
 def train(training_set, val_set, model: nn.Module, criterion, n_epochs, lr, weight_decay):
-    train_dataloader = DataLoader(training_set, batch_size=256, shuffle=True, pin_memory=True, num_workers=8)
+    train_dataloader = DataLoader(training_set, batch_size=128, shuffle=True, pin_memory=True, num_workers=4)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9, nesterov=True)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=1, cooldown=2)
     model.to(device)
@@ -488,16 +515,16 @@ def train(training_set, val_set, model: nn.Module, criterion, n_epochs, lr, weig
                 avg_loss = 0.0
 
         # Validation per epoch
-        val_loss = validate(model, val_set, criterion=criterion)
+        val_accuracy, val_loss = validate(model, val_set, criterion=criterion)
         scheduler.step(val_loss)
         print(f"Validation loss at epoch {e}: {val_loss}")
-        print(f"Validation accuracy at epoch {e}: {accuracy_score(np.concatenate(truth), np.concatenate(predictions))}")
+        print(f"Validation accuracy at epoch {e}: {val_accuracy}")
 
     return model
 
 
 def validate(model, data_set, criterion):
-    val_dataloader = DataLoader(data_set, batch_size=1024, shuffle=False, pin_memory=True, num_workers=8)
+    val_dataloader = DataLoader(data_set, batch_size=128, shuffle=False, pin_memory=True, num_workers=4)
     model.eval()
     truth = []
     predictions = []
@@ -511,7 +538,23 @@ def validate(model, data_set, criterion):
             truth.append(y.cpu().numpy())
             predictions.append(outputs.cpu().numpy().argmax(axis=1))
     val_loss = val_loss / len(data_set)
-    return val_loss
+    val_accuracy = accuracy_score(np.concatenate(truth), np.concatenate(predictions))
+    return val_accuracy, val_loss
+
+
+def validate_closeness(model, data_set, criterion):
+    similarity_measure = nn.CosineSimilarity()
+    model.eval()
+    data_loader = DataLoader(data_set, batch_size=128, shuffle=False, collate_fn=data_set.collate_fn)
+    for (batch_1, batch_2), labels in data_loader:
+        batch_1 = batch_1.to(device)
+        batch_2 = batch_2.to(device)
+        with torch.no_grad():
+            embedding_1, _ = model(batch_1, return_embedding=True)
+            embedding_2, _ = model(batch_2, return_embedding=True)
+        loss = criterion(embedding_1, embedding_2).mean()
+
+    return loss
 
 
 def test(model):
@@ -536,6 +579,10 @@ def make_classification_submission(model):
     submission.to_csv("classification_submission.csv", index=False)
 
 
+def make_verification_submission(model, similarity_thresh=0.5):
+    pass
+
+
 def run_train():
     n_classes = len(training_data.classes)
     training_criterion = nn.CrossEntropyLoss()
@@ -555,8 +602,11 @@ def run_train():
     # model = ResNet34NoDownSample(n_classes)  # 0.845 with weight_decay 5e-4 and transformer Horizontal flip and random erasing.
     # model = ResNet34NoDownSample(n_classes) # 0.8125 with weight_decay 5e-4 and transformer HorizonbtalFlip RandomErasing RandomPerspective 
     # model = ResNet34NoDownSample(n_classes)  # 0.8425 with weight decay 5e-4, HorizontalFlip, RandomErasing, lr=0.2
-    model = ResNet34NoDownSampleSmallKernel(n_classes)
-
+    # model = ResNet34NoDownSampleSmallKernel(n_classes)
+    # model = ResNet34(n_classes)    # 0.8425 with weight_decay 5e-4 and transformer Resize(224, 224) HorizontalFlip, RandomErasing
+    # model = ResNet50(n_classes)    # 0.8485 with same config as above
+    model = EfficientNet('b4', n_classes)
+    model.load_state_dict(torch.load("saved_model"))
     n_epochs = 50
     trained_model = train(training_data, validation_data, model, training_criterion, n_epochs, lr=0.1, weight_decay=5e-4)
     torch.save(trained_model.state_dict(), "saved_model")
@@ -567,6 +617,18 @@ def run_submission():
     model = ResNet34NoDownSample(4000)
     model.load_state_dict(torch.load("saved_model"))
     make_classification_submission(model)
+
+
+def run_train_with_closeness():
+    n_classes = len(training_data.classes)
+    training_criterion = nn.CrossEntropyLoss()
+    # Use Centor loss
+    closeness_criterion = CenterLoss(num_class=n_classes, num_feature=64)
+    model = ResNet34(n_classes)
+    n_epochs = 50
+    trained_model = train_with_closeness(training_data, validation_data, model, training_criterion, closeness_criterion,
+                                         n_epochs, lr_l=0.1, lr_c=0.1, weight_decay=5e-4, closeness_ratio=1)
+    torch.save(trained_model.state_dict(), "saved_model_clos")
 
 
 if __name__ == "__main__":

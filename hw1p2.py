@@ -232,6 +232,7 @@ if __name__ == "__main__":
     epochs = 90
     # We are going to adjust the learning rate every epoch
     # accroding the validation error.
+    print(model)
     for epoch in range(epochs):
         # Train
         print(f"Current learning rate is {optimizer.param_groups[0]['lr']}")
