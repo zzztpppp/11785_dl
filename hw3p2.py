@@ -93,7 +93,7 @@ class TestDataSet(Dataset):
         return pad_sequence(batch_x, batch_first=True)
 
 
-batch_size = 128
+batch_size = 32
 
 # training data
 train_set = LabeledDataset(train_data_dir, train_label_dir)
@@ -199,4 +199,5 @@ def train():
 
 
 if __name__ == "__main__":
+    torch.cuda.empty_cache()
     train()
