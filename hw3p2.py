@@ -98,12 +98,12 @@ batch_size = 128
 # training data
 train_set = LabeledDataset(train_data_dir, train_label_dir)
 train_args = {"batch_size": batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
-train_loader = DataLoader(train_set, **train_args)
+train_loader = DataLoader(train_set, **train_args, pin_memory=True, num_workers=2)
 
 # validation data
 dev = LabeledDataset(dev_data_dir, dev_label_dir)
-dev_args = {"batch_size": batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
-dev_loader = DataLoader(dev, **dev_args)
+dev_args = {"batch_size": batch_size * 2, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
+dev_loader = DataLoader(dev, **dev_args, pin_memory=True)
 
 # test data
 test = TestDataSet(test_data_dir)
@@ -150,7 +150,8 @@ class Model1(torch.nn.Module):
 
 def train_epoch(training_loader, model, criterion, optimizer):
     (batch_x, batch_y), (batch_seq_lengths, batch_target_sizes) = next(iter(training_loader))
-
+    batch_x = batch_x.to(device)
+    batch_y = batch_y.to(device)
     model.train()
     optimizer.zero_grad()
     outputs = model(batch_x, batch_seq_lengths)
@@ -172,6 +173,8 @@ def validate(model, validation_loader, criterion):
     with torch.no_grad():
         for batch_num, ((batch_x, batch_y), (batch_seq_lengths, batch_target_lengths)) in enumerate(validation_loader):
             total_size += batch_y.size(dim=1)
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
             # Output from model is (N, L, D) but ctcloss accepts (L, N, D)
             y_hat = log_softmax(predict(model, batch_x, batch_seq_lengths), dim=-1)
             loss = criterion(y_hat.transpose(0, 1), batch_y, batch_seq_lengths, batch_target_lengths)
@@ -187,6 +190,7 @@ def train():
     optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, nesterov=True)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=2, cooldown=1, verbose=True)
     ctc_loss = torch.nn.CTCLoss()
+    model.to(device)
     for i in range(n_epochs):
         train_epoch(train_loader, model, ctc_loss, optimizer)
         validation_loss = validate(model, dev_loader, ctc_loss)
