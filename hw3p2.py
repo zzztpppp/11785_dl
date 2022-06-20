@@ -80,10 +80,11 @@ class TestDataSet(Dataset):
     # TODO: replace x and y with dataset path and load data from here -> more efficient
     def __init__(self, x, test_order_path):
         with open(test_order_path, "r") as f:
-            file_order = f.readlines()
+            file_order = f.read().splitlines()
         # Remove header
         file_order = file_order[1:]
-        self.X = [np.load(p, allow_pickle=True) for p in file_order]
+        x_files = [os.path.join(x, p) for p in file_order]
+        self.X = [np.load(p, allow_pickle=True) for p in x_files]
         self.seq_lengths = [x.shape[0] for x in self.X]
 
     # get number of items/rows in dataset
