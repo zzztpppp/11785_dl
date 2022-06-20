@@ -3,9 +3,11 @@ import sys
 
 import numpy as np
 import torch
+import argparse
 from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence, pad_packed_sequence
+from utils import greedy_search
 
-from torch.nn.functional import log_softmax
+from torch.nn.functional import log_softmax, softmax
 from torch.utils.data import Dataset, DataLoader
 from phonemes import PHONEME_MAP, PHONEMES
 
@@ -13,10 +15,11 @@ from phonemes import PHONEME_MAP, PHONEMES
 train_data_dir = os.path.join("hw3p2_data", "train", "mfcc")
 train_label_dir = os.path.join("hw3p2_data", "train", "transcript")
 
-dev_data_dir = os.path.join("hw3p2_data", "train", "mfcc")
-dev_label_dir = os.path.join("hw3p2_data", "train", "transcript")
+dev_data_dir = os.path.join("hw3p2_data", "dev", "mfcc")
+dev_label_dir = os.path.join("hw3p2_data", "dev", "transcript")
 
-test_data_dir = os.path.join("hw3p2_data", "train", "mfcc")
+test_data_dir = os.path.join("hw3p2_data", "test", "mfcc")
+test_data_order_dir = os.path.join('hw3p2_data', "test", "test_order.csv")
 
 
 # Check if cuda is available and set device
@@ -75,9 +78,13 @@ class LabeledDataset(Dataset):
 class TestDataSet(Dataset):
     # load the dataset
     # TODO: replace x and y with dataset path and load data from here -> more efficient
-    def __init__(self, x):
-        x_file_list = [os.path.join(x, p) for p in os.listdir(x)]
-        self.X = [np.load(p, allow_pickle=True) for p in x_file_list]
+    def __init__(self, x, test_order_path):
+        with open(test_order_path, "r") as f:
+            file_order = f.readlines()
+        # Remove header
+        file_order = file_order[1:]
+        self.X = [np.load(p, allow_pickle=True) for p in file_order]
+        self.seq_lengths = [x.shape[0] for x in self.X]
 
     # get number of items/rows in dataset
     def __len__(self):
@@ -85,31 +92,36 @@ class TestDataSet(Dataset):
 
     def __getitem__(self, index):
         x = self.X[index]
-        return x
+        seq_length = self.seq_lengths[index]
+        return x, seq_length
 
     @staticmethod
     def collate_fn(batch):
-        batch_x = [torch.tensor(x) for x in batch]
-        return pad_sequence(batch_x, batch_first=True)
+        batch_x = [torch.tensor(x) for (x, _)in batch]
+        batch_seq_lengths =[l for (_, l) in batch]
+        return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
 
-batch_size = 32
+training_batch_size = 32
+val_batch_size = 512
+test_batch_size = 512
+
 
 # training data
 train_set = LabeledDataset(train_data_dir, train_label_dir)
-train_args = {"batch_size": batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
+train_args = {"batch_size": training_batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
 train_loader = DataLoader(train_set, **train_args, pin_memory=True, num_workers=2)
 
 # validation data
 dev = LabeledDataset(dev_data_dir, dev_label_dir)
-dev_args = {"batch_size": batch_size * 2, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
+dev_args = {"batch_size": val_batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
 dev_loader = DataLoader(dev, **dev_args, pin_memory=True)
 
 # test data
-test = TestDataSet(test_data_dir)
+test = TestDataSet(test_data_dir, test_data_order_dir)
 
-test_args = {"batch_size": len(test), "collate_fn": TestDataSet.collate_fn}
-test_loader = DataLoader(test, **test_args)
+test_args = {"batch_size": test_batch_size, "collate_fn": TestDataSet.collate_fn}
+test_loader = DataLoader(test, shuffle=False, **test_args)
 
 
 # BaseLine model
@@ -129,7 +141,7 @@ class Model1(torch.nn.Module):
             mlp.append(torch.nn.ReLU())
 
         # Output layer
-        mlp.extend([torch.nn.Linear(mlp_sizes[-1], len(PHONEMES)), torch.nn.ReLU()])
+        mlp.extend([torch.nn.Linear(mlp_sizes[-1], len(PHONEMES))])
         self.mlp = torch.nn.Sequential(*mlp)
 
     def forward(self, x, seq_lengths):
@@ -148,6 +160,25 @@ class Model1(torch.nn.Module):
         return out
 
 
+def output_result(model, test_data_loader):
+    """
+    Predict the result of our test set.
+    Determine the output sequence by beam-searching.
+    :param test_data_loader:
+    :param model:
+    :param symbol_list:
+    :param y_probs:
+    :param beam_width:
+    :return:
+    """
+    output_seqs = []
+    for batch_x, batch_seq_length in test_data_loader:
+        result = predict(model, batch_x, batch_seq_length)
+        best_seqs, _ = greedy_search(PHONEME_MAP, softmax(result, dim=-1).detach().numpy().transpose(2, 1, 0))
+        output_seqs.extend(best_seqs)
+    return output_seqs
+
+
 def train_epoch(training_loader, model, criterion, optimizer):
     (batch_x, batch_y), (batch_seq_lengths, batch_target_sizes) = next(iter(training_loader))
     batch_x = batch_x.to(device)
@@ -156,7 +187,8 @@ def train_epoch(training_loader, model, criterion, optimizer):
     optimizer.zero_grad()
     outputs = model(batch_x, batch_seq_lengths)
     # CTC loss requires (L B, C) so we transpose
-    loss = criterion(outputs.transpose(0, 1), batch_y, batch_seq_lengths, batch_target_sizes)
+    loss = criterion(log_softmax(outputs.transpose(0, 1), dim=-1), batch_y, batch_seq_lengths, batch_target_sizes)
+    print(f"Training loss {loss}")
     loss.backward()
     optimizer.step()
 
@@ -178,15 +210,16 @@ def validate(model, validation_loader, criterion):
             # Output from model is (N, L, D) but ctcloss accepts (L, N, D)
             y_hat = log_softmax(predict(model, batch_x, batch_seq_lengths), dim=-1)
             loss = criterion(y_hat.transpose(0, 1), batch_y, batch_seq_lengths, batch_target_lengths)
-            total_loss += loss.item()
+            total_loss += (loss.item() * batch_y.size(dim=1))
 
     # Return average loss
     return total_loss / total_size
 
 
 def train():
-    n_epochs = 100
-    model = Model1(cnn_channels=26, n_lstm_layers=1, bidirectional=False, mlp_sizes=[4096, 4096, 4096])
+    n_epochs = 5
+    model = Model1(cnn_channels=26, n_lstm_layers=1, bidirectional=False, mlp_sizes=[512, 512])
+    print(model)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, nesterov=True)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=2, cooldown=1, verbose=True)
     ctc_loss = torch.nn.CTCLoss()
@@ -196,8 +229,24 @@ def train():
         validation_loss = validate(model, dev_loader, ctc_loss)
         print(f"Epoch {i}, validation_loss: {validation_loss}")
         scheduler.step(validation_loss)
+    return model
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=['train', 'test'])
+    parser.add_argument("--model_path", type=str)
+    args = parser.parse_args()
     torch.cuda.empty_cache()
-    train()
+
+    if args.mode == 'train':
+        model = train()
+        torch.save(model.state_dict(), "saved_model_hw3p2")
+    else:
+        path = args.model_path
+        if path is None:
+            path = "saved_model_hw3p2"
+        model = Model1(cnn_channels=26, n_lstm_layers=1, bidirectional=False, mlp_sizes=[512, 512])
+        model.load_state_dict(torch.load(path))
+
+    output_result(model, test_loader)
