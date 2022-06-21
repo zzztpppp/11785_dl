@@ -228,7 +228,7 @@ def validate(model, validation_loader, criterion):
 
 def train():
     n_epochs = 100
-    model = Model1(cnn_channels=256, n_lstm_layers=1, bidirectional=True, mlp_sizes=[512, 512])
+    model = Model1(cnn_channels=256, n_lstm_layers=1, bidirectional=True, mlp_sizes=[2048])
     print(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5, cooldown=0, verbose=True)
