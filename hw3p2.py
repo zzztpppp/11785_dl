@@ -4,8 +4,9 @@ import sys
 import numpy as np
 import torch
 import argparse
+import pandas as pd
 from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence, pad_packed_sequence
-from utils import greedy_search
+from utils import greedy_search, beam_search_batch
 
 from torch.nn.functional import log_softmax, softmax
 from torch.utils.data import Dataset, DataLoader
@@ -104,19 +105,19 @@ class TestDataSet(Dataset):
 
 
 training_batch_size = 32
-val_batch_size = 512
-test_batch_size = 512
+val_batch_size = 128
+test_batch_size = 128  # Save memory for beam search
 
 
 # training data
 train_set = LabeledDataset(train_data_dir, train_label_dir)
 train_args = {"batch_size": training_batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
-train_loader = DataLoader(train_set, **train_args, pin_memory=True, num_workers=2)
+train_loader = DataLoader(train_set, **train_args, pin_memory=True, num_workers=4)
 
 # validation data
 dev = LabeledDataset(dev_data_dir, dev_label_dir)
 dev_args = {"batch_size": val_batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
-dev_loader = DataLoader(dev, **dev_args, pin_memory=True)
+dev_loader = DataLoader(dev, **dev_args, pin_memory=True, num_workers=4)
 
 # test data
 test = TestDataSet(test_data_dir, test_data_order_dir)
@@ -149,6 +150,7 @@ class Model1(torch.nn.Module):
         # x is of shape (N, T, 13)
         # But conv1d requires (N, 13, T)
         embed = self.cnn.forward(x.transpose(1, 2))
+        embed = torch.nn.functional.relu(embed)
         # pack_padded_sequence requires (N, T, 13)
         packed_embed = pack_padded_sequence(embed.transpose(1, 2), seq_lengths, batch_first=True, enforce_sorted=False)
 
@@ -161,23 +163,29 @@ class Model1(torch.nn.Module):
         return out
 
 
-def output_result(model, test_data_loader):
+def output_result(model, test_data_loader, search="beam", beam_width=10):
     """
     Predict the result of our test set.
     Determine the output sequence by beam-searching.
     :param test_data_loader:
     :param model:
-    :param symbol_list:
-    :param y_probs:
-    :param beam_width:
     :return:
     """
     output_seqs = []
+    model.to("cpu")
     for batch_x, batch_seq_length in test_data_loader:
         result = predict(model, batch_x, batch_seq_length)
-        best_seqs, _ = greedy_search(PHONEME_MAP, softmax(result, dim=-1).detach().numpy().transpose(2, 1, 0))
+        if search == 'beam':
+            best_seqs, _ =  beam_search_batch(PHONEME_MAP[1:],
+                                              softmax(result, dim=-1).detach().numpy().transpose(2, 1, 0), beam_width)
+        else:
+            best_seqs, _ = greedy_search(PHONEME_MAP, softmax(result, dim=-1).detach().numpy().transpose(2, 1, 0))
+
         output_seqs.extend(best_seqs)
-    return output_seqs
+    ids = np.arange(len(output_seqs))
+    data = np.vstack([ids, np.array(output_seqs)])
+    df = pd.DataFrame(data=data.T, columns=['id', 'predictions'])
+    df.to_csv("hw3p2_submission.csv", index=False)
 
 
 def train_epoch(training_loader, model, criterion, optimizer):
@@ -205,24 +213,25 @@ def validate(model, validation_loader, criterion):
     total_size = 0
     with torch.no_grad():
         for batch_num, ((batch_x, batch_y), (batch_seq_lengths, batch_target_lengths)) in enumerate(validation_loader):
-            total_size += batch_y.size(dim=1)
+            batch_size, _ = batch_y.shape
+            total_size += batch_size
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
             # Output from model is (N, L, D) but ctcloss accepts (L, N, D)
             y_hat = log_softmax(predict(model, batch_x, batch_seq_lengths), dim=-1)
             loss = criterion(y_hat.transpose(0, 1), batch_y, batch_seq_lengths, batch_target_lengths)
-            total_loss += (loss.item() * batch_y.size(dim=1))
+            total_loss += (loss.item() * batch_size)
 
     # Return average loss
     return total_loss / total_size
 
 
 def train():
-    n_epochs = 5
-    model = Model1(cnn_channels=26, n_lstm_layers=1, bidirectional=False, mlp_sizes=[512, 512])
+    n_epochs = 100
+    model = Model1(cnn_channels=256, n_lstm_layers=1, bidirectional=True, mlp_sizes=[512, 512])
     print(model)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, nesterov=True)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=2, cooldown=1, verbose=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5, cooldown=0, verbose=True)
     ctc_loss = torch.nn.CTCLoss()
     model.to(device)
     for i in range(n_epochs):
@@ -241,13 +250,13 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
 
     if args.mode == 'train':
-        model = train()
-        torch.save(model.state_dict(), "saved_model_hw3p2")
+        trained_model = train()
+        torch.save(trained_model.state_dict(), "saved_model_hw3p2")
     else:
         path = args.model_path
         if path is None:
             path = "saved_model_hw3p2"
-        model = Model1(cnn_channels=26, n_lstm_layers=1, bidirectional=False, mlp_sizes=[512, 512])
-        model.load_state_dict(torch.load(path))
+        trained_model = Model1(cnn_channels=256, n_lstm_layers=4, bidirectional=True, mlp_sizes=[512, 512])
+        trained_model.load_state_dict(torch.load(path))
 
-    output_result(model, test_loader)
+    output_result(trained_model, test_loader, "greedy")
