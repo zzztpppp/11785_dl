@@ -11,7 +11,7 @@ from utils import greedy_search, beam_search_batch
 from torch.nn.functional import log_softmax, softmax
 from torch.utils.data import Dataset, DataLoader
 from phonemes import PHONEME_MAP, PHONEMES
-
+from ctcdecode import CTCBeamDecoder
 
 train_data_dir = os.path.join("hw3p2_data", "train", "mfcc")
 train_label_dir = os.path.join("hw3p2_data", "train", "transcript")
@@ -22,14 +22,13 @@ dev_label_dir = os.path.join("hw3p2_data", "dev", "transcript")
 test_data_dir = os.path.join("hw3p2_data", "test", "mfcc")
 test_data_order_dir = os.path.join('hw3p2_data', "test", "test_order.csv")
 
-
 # Check if cuda is available and set device
 cuda = torch.cuda.is_available()
 device = torch.device("cuda" if cuda else "cpu")
 
 num_workers = 8 if cuda else 0
 
-print("Cuda = ", str(cuda), " with num_workers = ", str(num_workers),  " system version = ", sys.version)
+print("Cuda = ", str(cuda), " with num_workers = ", str(num_workers), " system version = ", sys.version)
 
 phoneme2int = dict(zip(PHONEMES, range(len(PHONEMES))))
 
@@ -67,7 +66,7 @@ class LabeledDataset(Dataset):
         batch_x = [torch.tensor(x) for (x, _), _ in batch]
         batch_y = [torch.tensor(y) for (_, y), _ in batch]
         batch_seq_lengths = [l for _, (l, _) in batch]
-        batch_target_lengths =[t for _, (_, t) in batch]
+        batch_target_lengths = [t for _, (_, t) in batch]
 
         # Pad variable length sequences
         padded_x = pad_sequence(batch_x, batch_first=True)
@@ -99,8 +98,8 @@ class TestDataSet(Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        batch_x = [torch.tensor(x) for (x, _)in batch]
-        batch_seq_lengths =[l for (_, l) in batch]
+        batch_x = [torch.tensor(x) for (x, _) in batch]
+        batch_seq_lengths = [l for (_, l) in batch]
         return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
 
@@ -109,37 +108,56 @@ val_batch_size = 128
 test_batch_size = 128  # Save memory for beam search
 
 
-# training data
-train_set = LabeledDataset(train_data_dir, train_label_dir)
-train_args = {"batch_size": training_batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
-train_loader = DataLoader(train_set, **train_args, pin_memory=True, num_workers=4)
+def get_labeled_data_loader(x_dir, y_dir, batch_size):
+    train_set = LabeledDataset(x_dir, y_dir)
+    train_args = {"shuffle": True, "collate_fn": LabeledDataset.collate_fn}
+    train_loader = DataLoader(train_set, **train_args, pin_memory=True, num_workers=4, batch_size=batch_size)
+    return train_loader
 
-# validation data
-dev = LabeledDataset(dev_data_dir, dev_label_dir)
-dev_args = {"batch_size": val_batch_size, "shuffle": True, "collate_fn": LabeledDataset.collate_fn}
-dev_loader = DataLoader(dev, **dev_args, pin_memory=True, num_workers=4)
 
-# test data
-test = TestDataSet(test_data_dir, test_data_order_dir)
+def get_unlabeled_data_loader(x_dir, data_order_dir, batch_size):
+    test = TestDataSet(x_dir, data_order_dir)
+    test_args = {"batch_size": batch_size, "collate_fn": TestDataSet.collate_fn}
+    test_loader = DataLoader(test, shuffle=False, **test_args)
+    return test_loader
 
-test_args = {"batch_size": test_batch_size, "collate_fn": TestDataSet.collate_fn}
-test_loader = DataLoader(test, shuffle=False, **test_args)
+
+def pick_and_translate_beams(beam_results: torch.tensor, beam_scores: torch.tensor, lengths: torch.tensor):
+    """
+    Pick the best result from beam search and translate to phonemes
+    :param beam_results: batch_size * n_beams * T
+    :param beam_scores: batch_size * n_beams
+    :param lengths: batch_size * n_beams
+    :return:
+    """
+    result = []
+    best_beam_index = beam_scores.argmax(dim=1)
+    best_beams = beam_results[:, best_beam_index, :].squeeze()
+    best_lengths = lengths[:, best_beam_index].squeeze()
+    batch_size, _ = best_beams.shape
+    # Translate beams
+    for b in range(batch_size):
+        current_beam_length = best_lengths[b]
+        current_beam = best_beams[b]
+        phonemes = [PHONEME_MAP[c] for c in current_beam[:current_beam_length]]
+        result.append(''.join(phonemes))
+    return result
 
 
 # BaseLine model
 # cnn --> lstm --> mlp
 class Model1(torch.nn.Module):
-    def __init__(self, cnn_channels, n_lstm_layers, bidirectional, mlp_sizes):
+    def __init__(self, cnn_channels, n_lstm_layers, bidirectional, mlp_sizes, dropout, **kwargs):
         super(Model1, self).__init__()
         self.cnn = torch.nn.Conv1d(in_channels=13, out_channels=cnn_channels, kernel_size=13, padding="same")
         self.lstm = torch.nn.LSTM(input_size=cnn_channels, hidden_size=cnn_channels, num_layers=n_lstm_layers,
-                                  bidirectional=bidirectional, batch_first=True)
+                                  bidirectional=bidirectional, batch_first=True, dropout=dropout)
 
         # Use the last hidden output as the final lstm layer output
         factor = 2 if bidirectional else 1
         mlp = [torch.nn.Linear(cnn_channels * factor, mlp_sizes[0]), torch.nn.ReLU()]
         for i in range(len(mlp_sizes) - 1):
-            mlp.append(torch.nn.Linear(mlp_sizes[i], mlp_sizes[i+1]))
+            mlp.append(torch.nn.Linear(mlp_sizes[i], mlp_sizes[i + 1]))
             mlp.append(torch.nn.ReLU())
 
         # Output layer
@@ -163,24 +181,22 @@ class Model1(torch.nn.Module):
         return out
 
 
-def output_result(model, test_data_loader, search="beam", beam_width=10):
+def output_result(model, beam_width=10):
     """
     Predict the result of our test set.
     Determine the output sequence by beam-searching.
-    :param test_data_loader:
+    param test_data_loader:
     :param model:
     :return:
     """
     output_seqs = []
     model.to("cpu")
+    test_data_loader = get_unlabeled_data_loader(test_data_dir, test_data_order_dir, test_batch_size)
+    decoder = CTCBeamDecoder(PHONEME_MAP, beam_width=beam_width, num_processes=8)
     for batch_x, batch_seq_length in test_data_loader:
         result = predict(model, batch_x, batch_seq_length)
-        if search == 'beam':
-            best_seqs, _ =  beam_search_batch(PHONEME_MAP[1:],
-                                              softmax(result, dim=-1).detach().numpy().transpose(2, 1, 0), beam_width)
-        else:
-            best_seqs, _ = greedy_search(PHONEME_MAP, softmax(result, dim=-1).detach().numpy().transpose(2, 1, 0))
-
+        beam_results, beam_scores, _, seq_len = decoder.decode(softmax(result, dim=-1))
+        best_seqs = pick_and_translate_beams(beam_results, beam_scores, seq_len)
         output_seqs.extend(best_seqs)
     ids = np.arange(len(output_seqs))
     data = np.vstack([ids, np.array(output_seqs)])
@@ -208,7 +224,7 @@ def predict(model, x, x_lengths):
     return y
 
 
-def validate(model, validation_loader, criterion):
+def validate(model, validation_loader, criterion, decoder=None):
     total_loss = 0.0
     total_size = 0
     with torch.no_grad():
@@ -226,11 +242,20 @@ def validate(model, validation_loader, criterion):
     return total_loss / total_size
 
 
-def train():
+def train(model, optimizer_params):
     n_epochs = 100
-    model = Model1(cnn_channels=256, n_lstm_layers=1, bidirectional=True, mlp_sizes=[2048])
     print(model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
+
+    lr = optimizer_params.get("lr")
+    if lr is None:
+        lr = 0.002
+    beam_width = optimizer_params.get("beam_width")
+    if beam_width is None:
+        beam_width = 10
+    train_loader = get_labeled_data_loader(train_data_dir, train_label_dir, training_batch_size)
+    dev_loader = get_labeled_data_loader(dev_data_dir, dev_label_dir, val_batch_size)
+    validation_decoder = CTCBeamDecoder(PHONEME_MAP, beam_width=beam_width)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5, cooldown=0, verbose=True)
     ctc_loss = torch.nn.CTCLoss()
     model.to(device)
@@ -245,18 +270,25 @@ def train():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=['train', 'test'])
-    parser.add_argument("--model_path", type=str)
+    parser.add_argument("model")
+    parser.add_argument("--lr", type=float)
+    parser.add_argument("--model_path")
+
     args = parser.parse_args()
+    training_params = vars(args)
     torch.cuda.empty_cache()
+    model_params = {"cnn_channels": 256, "n_lstm_layers": 4, "bidirectional": True, "mlp_sizes": [2048], "dropout": 0.3}
+    model_params_str = f"({', '.join(['='.join([str(k), str(v)]) for k, v in model_params.items()])})"
+    model_name = args.model
+    training_model = eval(model_name + model_params_str)
 
     if args.mode == 'train':
-        trained_model = train()
-        torch.save(trained_model.state_dict(), "saved_model_hw3p2")
+        training_model = train(training_model, training_params)
+        torch.save(training_model.state_dict(), "saved_model_hw3p2")
     else:
         path = args.model_path
         if path is None:
             path = "saved_model_hw3p2"
-        trained_model = Model1(cnn_channels=256, n_lstm_layers=4, bidirectional=True, mlp_sizes=[512, 512])
-        trained_model.load_state_dict(torch.load(path))
+        training_model.load_state_dict(torch.load(path))
 
-    output_result(trained_model, test_loader, "greedy")
+    output_result(training_model)
