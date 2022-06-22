@@ -103,7 +103,7 @@ class TestDataSet(Dataset):
         return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
 
-training_batch_size = 32
+training_batch_size = 64
 val_batch_size = 128
 test_batch_size = 128  # Save memory for beam search
 
@@ -130,10 +130,11 @@ def pick_and_translate_beams(beam_results: torch.tensor, beam_scores: torch.tens
     :param lengths: batch_size * n_beams
     :return:
     """
+    batch_size, _, _ = beam_results.shape
     result = []
     best_beam_index = beam_scores.argmax(dim=1)
-    best_beams = beam_results[:, best_beam_index, :].squeeze()
-    best_lengths = lengths[:, best_beam_index].squeeze()
+    best_beams = torch.vstack([beam_results[i, best_beam_index[i], :].squeeze() for i in range(batch_size)])
+    best_lengths = torch.vstack([lengths[i, best_beam_index[i]].squeeze() for i in range(batch_size)])
     batch_size, _ = best_beams.shape
     # Translate beams
     for b in range(batch_size):
@@ -155,9 +156,10 @@ class Model1(torch.nn.Module):
 
         # Use the last hidden output as the final lstm layer output
         factor = 2 if bidirectional else 1
-        mlp = [torch.nn.Linear(cnn_channels * factor, mlp_sizes[0]), torch.nn.ReLU()]
+        mlp = [torch.nn.Linear(cnn_channels * factor, mlp_sizes[0]), torch.nn.ReLU(), torch.nn.Dropout(p=dropout)]
         for i in range(len(mlp_sizes) - 1):
             mlp.append(torch.nn.Linear(mlp_sizes[i], mlp_sizes[i + 1]))
+            mlp.append(torch.nn.Dropout(p=dropout))
             mlp.append(torch.nn.ReLU())
 
         # Output layer
@@ -243,10 +245,11 @@ def validate(model, validation_loader, criterion, decoder=None):
 
 
 def train(model, optimizer_params):
-    n_epochs = 100
+    n_epochs = 1000
     print(model)
 
     lr = optimizer_params.get("lr")
+    weight_decay = optimizer_params.get("weight_decay")
     if lr is None:
         lr = 0.002
     beam_width = optimizer_params.get("beam_width")
@@ -255,7 +258,7 @@ def train(model, optimizer_params):
     train_loader = get_labeled_data_loader(train_data_dir, train_label_dir, training_batch_size)
     dev_loader = get_labeled_data_loader(dev_data_dir, dev_label_dir, val_batch_size)
     validation_decoder = CTCBeamDecoder(PHONEME_MAP, beam_width=beam_width)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=5, cooldown=0, verbose=True)
     ctc_loss = torch.nn.CTCLoss()
     model.to(device)
@@ -272,6 +275,7 @@ if __name__ == "__main__":
     parser.add_argument("mode", choices=['train', 'test'])
     parser.add_argument("model")
     parser.add_argument("--lr", type=float)
+    parser.add_argument("--weight_decay", type=float)
     parser.add_argument("--model_path")
 
     args = parser.parse_args()
