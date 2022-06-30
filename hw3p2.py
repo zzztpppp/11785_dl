@@ -153,7 +153,7 @@ class Model1(torch.nn.Module):
         super(Model1, self).__init__()
         self.cnn_1 = torch.nn.Conv1d(in_channels=13, out_channels=cnn_channels, kernel_size=3, padding='same')
         self.cnn_2 = torch.nn.Conv1d(in_channels=cnn_channels, out_channels=cnn_channels * 2, kernel_size=3,
-                                     stride=2)
+                                     stride=3)
         self.lstm = torch.nn.LSTM(input_size=cnn_channels * 2, hidden_size=cnn_channels * 2, num_layers=n_lstm_layers,
                                   bidirectional=bidirectional, batch_first=True, dropout=dropout)
 
@@ -178,7 +178,7 @@ class Model1(torch.nn.Module):
         embed =  torch.nn.functional.relu(embed)
         # pack_padded_sequence requires (N, T, 13)
         # Since we are doning down-sampling ,the seq lengths change correspondingly.
-        down_sampled_seq_length = [(x - 3) // 2 for x in seq_lengths]
+        down_sampled_seq_length = [(x - 3) // 3 for x in seq_lengths]
         packed_embed = pack_padded_sequence(embed.transpose(1, 2), down_sampled_seq_length, batch_first=True, enforce_sorted=False)
 
         seq_out, _ = self.lstm.forward(packed_embed)  # (N, L, D*H_out)
@@ -287,7 +287,7 @@ def train(model, optimizer_params):
     dev_loader = get_labeled_data_loader(dev_data_dir, dev_label_dir, val_batch_size)
     validation_decoder = CTCBeamDecoder(PHONEME_MAP, beam_width=beam_width)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=10, cooldown=0, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=30, cooldown=0, verbose=True)
     ctc_loss = torch.nn.CTCLoss()
     for i in range(n_epochs):
         train_epoch(train_loader, model, ctc_loss, optimizer)
