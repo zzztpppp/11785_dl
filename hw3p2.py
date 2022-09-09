@@ -187,6 +187,26 @@ class ResidualBlock1D(torch.nn.Module):
         return torch.nn.functional.relu(out + residual)
 
 
+class GaussianNoise(torch.nn.Module):
+    def __init__(self, p=0.3, mean=0, std=1):
+        super(GaussianNoise, self).__init__()
+        self.p = p
+        self.mean = mean
+        self.std = std
+
+    def forward(self, x):
+        """
+        Add noise to a fraction of p samples
+        :param x:
+        :return:
+        """
+        noise = torch.randn(x.size())
+        noise = noise * self.std + self.mean
+        mask = torch.bernoulli(torch.ones_like(x) * torch.tensor(0.3))
+        x = x + noise * mask
+        return x
+
+
 class EmbeddingLayer0(torch.nn.Module):
     def __init__(self):
         """
@@ -204,13 +224,47 @@ class EmbeddingLayer0(torch.nn.Module):
         return self.layers(x)
 
 
+class EmbeddingLayer1(torch.nn.Module):
+    """
+    2x down-sampling cnn
+    """
+    def __init__(self):
+        super(EmbeddingLayer1, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 32, 3),
+            ResidualBlock1D(32, 64, 3),
+            ResidualBlock1D(64, 128,3),
+            ResidualBlock1D(128, 256, 3, 3)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class EmbeddingLayer2(torch.nn.Module):
+    """
+    A deeper embedding with 4x down sample
+    """
+    def __init__(self):
+        super(EmbeddingLayer2, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 32, 3),
+            ResidualBlock1D(32, 64, 3),
+            ResidualBlock1D(64, 64, 3),
+            ResidualBlock1D(64, 128, 3, 2),
+            ResidualBlock1D(128, 128, 3),
+            ResidualBlock1D(128, 256, 3, 2),
+            ResidualBlock1D(256, 256, 3)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
 class MLPLayer(torch.nn.Module):
     def __init__(self, input_size, mlp_size, dropout, **kwargs):
         super(MLPLayer, self).__init__()
-        mlp = []
-        mlp.append(nn.Linear(input_size, mlp_size[0]))
-        mlp.append(nn.ReLU())
-        mlp.append(nn.Dropout(dropout))
+        mlp = [nn.Linear(input_size, mlp_size[0]), nn.ReLU(), nn.Dropout(dropout)]
         mlp_size = mlp_size[1:]
         for i in range(len(mlp_size) - 1):
             mlp.append(nn.Linear(mlp_size[i], mlp_size[i + 1]))
@@ -252,6 +306,46 @@ class Model3(Model2):
         super(Model3, self).__init__(dropout, **kwargs)
         self.lstm_layer = nn.LSTM(input_size=256, hidden_size=256, num_layers=4, bidirectional=True, batch_first=True,
                                   dropout=dropout)
+
+
+class Model4(Model3):
+    def __init__(self, dropout, **kwargs):
+        super(Model4, self).__init__(dropout, **kwargs)
+        self.embed_layer = EmbeddingLayer2()
+
+    def forward(self, x, seq_lengths):
+        down_sampled_lenghts = [(l - 3) // 3 + 1 for l in seq_lengths]
+        out, _ = super(Model4, self).forward(x, down_sampled_lenghts)
+        return out, down_sampled_lenghts
+
+
+class Model5(Model3):
+    def __init__(self, dropout, **kwargs):
+        super(Model5, self).__init__(dropout, **kwargs)
+        self.embed_layer = EmbeddingLayer2()
+
+    def forward(self, x, seq_lengths):
+        down_sampled_lenghts = [(l - 3) // 4 + 1 for l in seq_lengths]
+        out, _ = super(Model5, self).forward(x, down_sampled_lenghts)
+        return out, down_sampled_lenghts
+
+
+
+# class Model4(Model3):
+#     def __init__(self, dropout, **kwargs):
+#         """
+#         Noisy version of Model3
+#         :param dropout:
+#         :param kwargs:
+#         """
+#         super(Model4, self).__init__(dropout, **kwargs)
+#         self.noise_layer = GaussianNoise()
+#
+#     def forward(self, x, seq_lengths):
+#         if self.training:
+#             x = self.noise_layer(x)
+#
+#         return super().forward(x, seq_lengths)
 
 
 class Model0(torch.nn.Module):
