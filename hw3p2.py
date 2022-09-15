@@ -47,7 +47,7 @@ phoneme2int = dict(zip(PHONEMES, range(len(PHONEMES))))
 class LabeledDataset(Dataset):
     # load the dataset
     def __init__(self, x, y):
-        # X and y are the directories containing training data and label
+        # X and y are the directories containing training data and labelkk
         x_file_list = [os.path.join(x, p) for p in os.listdir(x)]
         y_file_list = [os.path.join(y, p) for p in os.listdir(y)]
         self.X = [np.load(p, allow_pickle=True) for p in x_file_list]
@@ -188,7 +188,7 @@ class ResidualBlock1D(torch.nn.Module):
 
 
 class GaussianNoise(torch.nn.Module):
-    def __init__(self, p=0.3, mean=0, std=1):
+    def __init__(self, p=0.3, mean=0, std=0.5):
         super(GaussianNoise, self).__init__()
         self.p = p
         self.mean = mean
@@ -200,9 +200,15 @@ class GaussianNoise(torch.nn.Module):
         :param x:
         :return:
         """
-        noise = torch.randn(x.size())
+        noise = torch.randn(x.size()).to(device)
+        batch_size = x.size()[0]
         noise = noise * self.std + self.mean
-        mask = torch.bernoulli(torch.ones_like(x) * torch.tensor(0.3))
+        mask = torch.bernoulli(torch.ones(batch_size, dtype=torch.float) * torch.tensor(0.3)).to(device)
+        # Unsqueeze to match the dimension of x
+        for _ in range(len(x.size()) - 1):
+            mask = mask[:, None]
+
+        mask = mask.broadcast_to(x.size())
         x = x + noise * mask
         return x
 
@@ -234,7 +240,7 @@ class EmbeddingLayer1(torch.nn.Module):
             ResidualBlock1D(13, 32, 3),
             ResidualBlock1D(32, 64, 3),
             ResidualBlock1D(64, 128,3),
-            ResidualBlock1D(128, 256, 3, 3)
+            ResidualBlock1D(128, 256, 3, 2)
         )
 
     def forward(self, x):
@@ -255,6 +261,25 @@ class EmbeddingLayer2(torch.nn.Module):
             ResidualBlock1D(128, 128, 3),
             ResidualBlock1D(128, 256, 3, 2),
             ResidualBlock1D(256, 256, 3)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class EmbeddingLayer3(torch.nn.Module):
+    """
+    2x down-sampling cnn with dropout
+    """
+    def __init__(self):
+        super(EmbeddingLayer3, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 32, 3),
+            ResidualBlock1D(32, 64, 3),
+            ResidualBlock1D(64, 128,3),
+            nn.Dropout(0.2),
+            ResidualBlock1D(128, 256, 3, 2),
+            nn.Dropout(0.2)
         )
 
     def forward(self, x):
@@ -311,23 +336,54 @@ class Model3(Model2):
 class Model4(Model3):
     def __init__(self, dropout, **kwargs):
         super(Model4, self).__init__(dropout, **kwargs)
-        self.embed_layer = EmbeddingLayer2()
+        self.embed_layer = EmbeddingLayer1()
 
     def forward(self, x, seq_lengths):
-        down_sampled_lenghts = [(l - 3) // 3 + 1 for l in seq_lengths]
+        down_sampled_lenghts = [(l - 3) // 2 + 1 for l in seq_lengths]
         out, _ = super(Model4, self).forward(x, down_sampled_lenghts)
         return out, down_sampled_lenghts
+
+
+class Model4Noisy(Model4):
+    def __init__(self, dropout, **kwargs):
+        super(Model4Noisy, self).__init__(dropout, **kwargs)
+        self.noise = GaussianNoise()
+
+    def forward(self, x, seq_lengths):
+        if self.training:
+            x = self.noise(x)
+        return super(Model4Noisy, self).forward(x, seq_lengths)
 
 
 class Model5(Model3):
     def __init__(self, dropout, **kwargs):
         super(Model5, self).__init__(dropout, **kwargs)
-        self.embed_layer = EmbeddingLayer2()
+        self.embed_layer = EmbeddingLayer3()
 
     def forward(self, x, seq_lengths):
         down_sampled_lenghts = [(l - 3) // 4 + 1 for l in seq_lengths]
         out, _ = super(Model5, self).forward(x, down_sampled_lenghts)
         return out, down_sampled_lenghts
+
+
+class Model6(Model4Noisy):
+    def __init__(self, dropout, **kwargs):
+        super(Model6, self).__init__(dropout, **kwargs)
+        self.mlp = MLPLayer(256 * 2, [2048, 2048, 2048], dropout)
+
+    def forward(self, x, seq_lengths):
+        return super(Model6, self).forward(x, seq_lengths)
+
+
+class Model7(Model6):
+    def  __init__(self, dropout, **kwargs):
+        super(Model7, self).__init__(dropout, **kwargs)
+        self.lstm_layer = nn.LSTM(input_size=256, hidden_size=256, num_layers=6, bidirectional=True, batch_first=True,
+                                  dropout=dropout)
+        self.mlp = MLPLayer(256 * 2, [2048, 2048], dropout)
+
+    def forward(self, x, seq_lengths):
+       return super(Model7, self).forward(x, seq_lengths)
 
 
 
@@ -518,7 +574,9 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler):
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
-    print("Training loss ", total_training_loss / len(training_loader))
+    training_loss_sum = "Training loss ", total_training_loss / len(training_loader)
+    logger.debug(training_loss_sum)
+    print(training_loss_sum)
 
 
 def predict(model, x, x_lengths):
@@ -566,7 +624,7 @@ def get_scheduler(optimizer, scheduler):
 
 
 def train(model, optimizer_params):
-    n_epochs = 100
+    n_epochs = 150
     print(model)
     logger.debug(model)
 
