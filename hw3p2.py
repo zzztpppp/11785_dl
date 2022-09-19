@@ -11,6 +11,7 @@ import logging
 from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence, pad_packed_sequence
 from utils import greedy_search, beam_search_batch
 from torch import nn
+from torchaudio.transforms import TimeMasking, FrequencyMasking
 
 from torch.nn.functional import log_softmax, softmax
 from torch.utils.data import Dataset, DataLoader
@@ -115,7 +116,7 @@ class TestDataSet(Dataset):
 
 training_batch_size = 32
 val_batch_size = 128
-test_batch_size = 128  # Save memory for beam search
+test_batch_size = 128  # Save memory for beam sear64
 
 
 def get_labeled_data_loader(x_dir, y_dir, batch_size):
@@ -286,6 +287,28 @@ class EmbeddingLayer3(torch.nn.Module):
         return self.layers(x)
 
 
+class EmbeddingLayer4(torch.nn.Module):
+    """
+    2x down-sampling cnn
+    """
+    def __init__(self):
+        super(EmbeddingLayer4, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 32, 3),
+            ResidualBlock1D(32, 32, 3),
+            ResidualBlock1D(32, 64, 3),
+            ResidualBlock1D(64, 64, 3),
+            ResidualBlock1D(64, 128,3),
+            ResidualBlock1D(128, 128, 3),
+            ResidualBlock1D(128, 256, 3),
+            ResidualBlock1D(256, 256, 3),
+            ResidualBlock1D(256, 512, 3, 2)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
 class MLPLayer(torch.nn.Module):
     def __init__(self, input_size, mlp_size, dropout, **kwargs):
         super(MLPLayer, self).__init__()
@@ -355,6 +378,20 @@ class Model4Noisy(Model4):
         return super(Model4Noisy, self).forward(x, seq_lengths)
 
 
+class Model4NoisyMasked(Model4Noisy):
+    def __init__(self, dropout, **kwargs):
+        super(Model4NoisyMasked, self).__init__(dropout, **kwargs)
+        # Apply both time mask and frequency mask
+        self.mask = nn.Sequential(
+            FrequencyMasking(4)
+        )
+
+    def forward(self, x, seq_lengths):
+        if self.training:
+            x = self.mask(x)
+        return super(Model4NoisyMasked, self).forward(x, seq_lengths)
+
+
 class Model5(Model3):
     def __init__(self, dropout, **kwargs):
         super(Model5, self).__init__(dropout, **kwargs)
@@ -378,13 +415,14 @@ class Model6(Model4Noisy):
 class Model7(Model6):
     def  __init__(self, dropout, **kwargs):
         super(Model7, self).__init__(dropout, **kwargs)
-        self.lstm_layer = nn.LSTM(input_size=256, hidden_size=256, num_layers=6, bidirectional=True, batch_first=True,
+        self.embed_layer = EmbeddingLayer4()
+        self.noise = GaussianNoise(std=0.4)
+        self.lstm_layer = nn.LSTM(input_size=512, hidden_size=512, num_layers=6, bidirectional=True, batch_first=True,
                                   dropout=dropout)
-        self.mlp = MLPLayer(256 * 2, [2048, 2048], dropout)
+        self.mlp = MLPLayer(512 * 2, [4096, 4096, 4096], dropout)
 
     def forward(self, x, seq_lengths):
        return super(Model7, self).forward(x, seq_lengths)
-
 
 
 # class Model4(Model3):
