@@ -8,9 +8,10 @@ import pandas as pd
 import Levenshtein
 import torch.nn.functional as F
 import logging
-from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_sequence, pad_packed_sequence, PackedSequence
 from utils import greedy_search, beam_search_batch
 from torch import nn
+from torchaudio.transforms import TimeMasking, FrequencyMasking, SlidingWindowCmn
 
 from torch.nn.functional import log_softmax, softmax
 from torch.utils.data import Dataset, DataLoader
@@ -113,9 +114,9 @@ class TestDataSet(Dataset):
         return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
 
-training_batch_size = 32
+training_batch_size = 48
 val_batch_size = 128
-test_batch_size = 128  # Save memory for beam search
+test_batch_size = 128  # Save memory for beam sear64
 
 
 def get_labeled_data_loader(x_dir, y_dir, batch_size):
@@ -153,6 +154,55 @@ def pick_and_translate_beams(beam_results: torch.tensor, beam_scores: torch.tens
         phonemes = [PHONEME_MAP[c] for c in current_beam[:current_beam_length]]
         result.append(''.join(phonemes))
     return result
+
+
+def freeze_layer(layer: nn.Module):
+    for param in layer.parameters():
+        param.requires_grad = False
+
+
+def unfreeze_layer(layer: nn.Module):
+    for param in layer.parameters():
+        param.requires_grad = True
+
+
+def alter_mlp_layer(model, mlp_module):
+    """
+    Alter the specific layer of a pretrained model
+    and freeze the rest.
+
+    :param model:
+    :param mlp_module:
+    :return: A function that unfreeze old layers when needed
+    """
+    model.mlp = mlp_module
+    freeze_layer(model.embed_layer)
+    freeze_layer(model.lstm_layer)
+    def unfreeze_other():
+        unfreeze_layer(model.embed_layer)
+        unfreeze_layer(model.lstm_layer)
+
+    return unfreeze_other
+
+def alter_lstm_layer(model, lstm_module):
+    model.lstm_layer = lstm_module
+    freeze_layer(model.mlp)
+    freeze_layer(model.embed_layer)
+
+    def unfreeze_other():
+        unfreeze_layer(model.mlp)
+        unfreeze_layer(model.embed_layer)
+
+    return unfreeze_other
+
+def alter_embedding_layer(model, embed_module):
+    model.embed_layer = embed_module
+    freeze_layer(model.lstm_layer)
+    freeze_layer(model.mlp)
+    def unfreeze_other():
+        unfreeze_layer(model.mlp)
+        unfreeze_layer(model.lstm_layer)
+    return unfreeze_other
 
 
 class ResidualBlock1D(torch.nn.Module):
@@ -203,7 +253,7 @@ class GaussianNoise(torch.nn.Module):
         noise = torch.randn(x.size()).to(device)
         batch_size = x.size()[0]
         noise = noise * self.std + self.mean
-        mask = torch.bernoulli(torch.ones(batch_size, dtype=torch.float) * torch.tensor(0.3)).to(device)
+        mask = torch.bernoulli(torch.ones(batch_size, dtype=torch.float) * torch.tensor(self.p)).to(device)
         # Unsqueeze to match the dimension of x
         for _ in range(len(x.size()) - 1):
             mask = mask[:, None]
@@ -230,6 +280,20 @@ class EmbeddingLayer0(torch.nn.Module):
         return self.layers(x)
 
 
+class EmbeddingLayer0Flat(torch.nn.Module):
+    def __init__(self):
+        """
+        Increase embedding size to 256. No dropout
+        """
+        super(EmbeddingLayer0Flat, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 128,3),
+            ResidualBlock1D(128, 256, 3)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
 class EmbeddingLayer1(torch.nn.Module):
     """
     2x down-sampling cnn
@@ -241,6 +305,79 @@ class EmbeddingLayer1(torch.nn.Module):
             ResidualBlock1D(32, 64, 3),
             ResidualBlock1D(64, 128,3),
             ResidualBlock1D(128, 256, 3, 2)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class EmbeddingLayer1Down4(nn.Module):
+    """
+    4x down-sampling cnn
+    """
+    def __init__(self, embed_dropout):
+        super(EmbeddingLayer1Down4, self).__init__()
+        modules = [
+            ResidualBlock1D(13, 32, 3),
+            ResidualBlock1D(32, 64, 3),
+            ResidualBlock1D(64, 128, 3),
+            ResidualBlock1D(128, 256, 3, 2),
+            ResidualBlock1D(256, 512, 3, 2)
+        ]
+        
+        if embed_dropout > 0:
+            modules.append(nn.Dropout(embed_dropout))
+        
+        self.layers = nn.Sequential(*modules)
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class EmbeddingLayer1Shallower(torch.nn.Module):
+    """
+    2x down-sampling cnn
+    """
+    def __init__(self):
+        super(EmbeddingLayer1Shallower, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 128, 3),
+            ResidualBlock1D(128, 256, 5, 2),
+            nn.Dropout(0.15)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class EmbeddingLayer1Deeper(torch.nn.Module):
+    """
+    2x down-sampling cnn
+    """
+    def __init__(self):
+        super(EmbeddingLayer1Deeper, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 32, 3),
+            ResidualBlock1D(32, 32, 3),
+            ResidualBlock1D(32, 64, 3),
+            ResidualBlock1D(64, 64, 3),
+            ResidualBlock1D(64, 128,3),
+            ResidualBlock1D(128, 128,3),
+            ResidualBlock1D(128, 256, 5, 2), 
+            ResidualBlock1D(256, 256, 3), 
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+class EmbeddingLayer1Wide(torch.nn.Module):
+    def __init__(self):
+        super(EmbeddingLayer1Wide, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 128, 3),
+            ResidualBlock1D(128, 256, 5, 2),
+            ResidualBlock1D(256, 512, 3),
+            ResidualBlock1D(512, 1024, 3)
         )
 
     def forward(self, x):
@@ -284,6 +421,146 @@ class EmbeddingLayer3(torch.nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+
+class EmbeddingLayer4(torch.nn.Module):
+    """
+    2x down-sampling cnn
+    """
+    def __init__(self):
+        super(EmbeddingLayer4, self).__init__()
+        self.layers = nn.Sequential(
+            ResidualBlock1D(13, 32, 3),
+            ResidualBlock1D(32, 32, 3),
+            ResidualBlock1D(32, 64, 3),
+            ResidualBlock1D(64, 64, 3),
+            ResidualBlock1D(64, 128,3),
+            ResidualBlock1D(128, 128, 3),
+            ResidualBlock1D(128, 256, 3),
+            ResidualBlock1D(256, 256, 3),
+            ResidualBlock1D(256, 512, 3, 2)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class EmbeddingLayerWide(torch.nn.Module):
+    """
+    A very wide embedding layer
+    """
+    def __init__(self):
+        super(EmbeddingLayerWide, self).__init__()
+        self.layer = nn.Sequential(
+               ResidualBlock1D(13, 256, 3),
+               ResidualBlock1D(256, 512, 3),
+               ResidualBlock1D(512, 1024, 5, 2),
+       )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+class LSTMDropout(torch.nn.Module):
+    def __init__(self, input_size, hidden_size, dropout):
+        super(LSTMDropout, self).__init__()
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True
+        ).to(device)
+        if dropout > 0:
+            self.dropout = nn.Dropout(dropout, inplace=True)
+        else:
+            self.dropout = None
+    def forward(self, x, seq_lengths):
+        out, _ = self.lstm.forward(x)
+        padded_out, _ = pad_packed_sequence(out, batch_first=True)
+        if self.dropout is not None:
+            padded_out = self.dropout(padded_out)
+        return pack_padded_sequence(padded_out, seq_lengths, batch_first=True, enforce_sorted=False)
+
+
+class PackedLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, dropout):
+        super(PackedLSTM, self).__init__()
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bidirectional=True,
+            batch_first=True,
+            dropout=dropout
+        )
+
+    def forward(self, x, seq_lengths):
+        packed_x = pack_padded_sequence(x, seq_lengths, batch_first=True, enforce_sorted=False)
+        packed_out, _ = self.lstm.forward(packed_x)
+        padded_out, _ = pad_packed_sequence(packed_out, batch_first=True)
+        return padded_out
+
+
+class LSTMSkip(torch.nn.Module):
+    """
+    A lstm layer with skip connections
+    """
+    def __init__(self, input_channel, hidden_channel, num_layers, dropout):
+        super(LSTMSkip, self).__init__()
+        self.lstms = []
+        assert num_layers > 3
+        for i in range(num_layers - 1):
+            self.lstms.append(
+                LSTMDropout(input_channel, hidden_channel, dropout).to(device)   # No recursive detection of modules.
+            )
+
+        # No dropout for the final layer, same as original stacked lstm
+        self.lstms.append(LSTMDropout(input_channel, hidden_channel, 0))
+
+    def forward(self, x, x_lengths):
+        packed_x = pack_padded_sequence(x, x_lengths, batch_first=True,
+                                        enforce_sorted=False)
+
+        # Skip connect the output from the first layer to following layers
+        out1 = self.lstms[0].forward(packed_x, x_lengths)
+        next_input = out1
+        for lstm in self.lstms[1: -1]:
+            data, batch_sizes, sorted_idx, unsorted_idx = lstm.forward(next_input, x_lengths)
+            data = data + out1[0]
+            next_input = PackedSequence(
+                data,
+                batch_sizes,
+                sorted_idx,
+                unsorted_idx
+            )
+
+        final_out = self.lstms[-1].forward(next_input, x_lengths)
+        return pad_packed_sequence(final_out, batch_first=True)
+
+class BiLSTMSkip(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, dropout):
+        super(BiLSTMSkip, self).__init__()
+        # 2 directions, one forward one backward
+        self.d1 = LSTMSkip(input_size, hidden_size, num_layers, dropout)
+        self.d2 = LSTMSkip(input_size, hidden_size, num_layers, dropout)
+        self.d1.to(device)
+        self.d2.to(device)
+
+    def forward(self, x, seq_lengths):
+        """
+
+        :param x: (B * T * D)
+        :param seq_lengths:
+        :return:
+        """
+        batch_size, max_seq, _ = x.shape
+        rev_x = torch.zeros_like(x)
+        for i in range(batch_size):
+            seq_length_i = seq_lengths[i]
+            rev_x[i, :seq_length_i, :] = x[i, : seq_length_i, :].flip(dims=[1])
+        out_x, _ = self.d1.forward(x, seq_lengths)
+        out_rev_x, _ = self.d2.forward(rev_x, seq_lengths)
+        return torch.cat([out_x, out_rev_x], dim=-1)
 
 
 class MLPLayer(torch.nn.Module):
@@ -355,6 +632,76 @@ class Model4Noisy(Model4):
         return super(Model4Noisy, self).forward(x, seq_lengths)
 
 
+class Model4NoisyMasked(Model4Noisy):
+    def __init__(self, dropout, noise_std, noise_prob, freq_mask, time_mask, embed_dropout, x_norm, **kwargs):
+        super(Model4NoisyMasked, self).__init__(dropout, **kwargs)
+
+        # Apply both time mask and frequency mask
+        if x_norm:
+            self.norm = SlidingWindowCmn(cmn_window=300, min_cmn_window=50)
+        else:
+            self.norm = None
+
+        masks = []
+
+        if freq_mask > 0:
+            masks.append(FrequencyMasking(freq_mask))
+        if time_mask > 0:
+            masks.append(TimeMasking(time_mask))
+
+        self.mask = nn.Sequential(*masks)
+
+        # self.lstm_layer = nn.LSTM(input_size=512, hidden_size=512, num_layers=4, bidirectional=True, batch_first=True, dropout=dropout)
+        self.lstm_layer = PackedLSTM(input_size=512, hidden_size=512, num_layers=6, dropout=dropout)
+        # self.lstm_layer = BiLSTMSkip(input_size=512, hidden_size=512, num_layers=4, dropout=dropout)
+
+        self.embed_layer = EmbeddingLayer1Down4(embed_dropout)
+
+        if noise_std > 0 or noise_prob > 0:
+            print("getting noise")
+            self.noise = GaussianNoise(p=noise_prob, std=noise_std)
+        else:
+            self.noise = None
+
+        self.mlp = MLPLayer(512 * 2, [4096, 4096, 4096, 4096], dropout)
+
+    def forward(self, x, seq_lengths):
+        seq_lengths = [((l - 1) // 2 + 1)  for l in seq_lengths]
+        seq_lengths = [((l - 1) // 2 + 1) for l in seq_lengths]
+        if self.norm is not None:
+            x = self.norm.forward(x)
+        if self.training:
+            if self.noise is not None:
+                x = self.noise.forward(x)
+            x = self.mask(x.transpose(1, 2)).transpose(1, 2)
+
+        embeddings = self.embed_layer(x.transpose(1, 2))
+        padded_seq_out = self.lstm_layer.forward(embeddings.transpose(1, 2), seq_lengths)
+
+        # mlp
+        out = self.mlp.forward(padded_seq_out)
+
+        # Shape of (N, L, 41)
+        return out, seq_lengths
+
+
+class Model4NoisyMaskedWide(Model4NoisyMasked):
+    def __init__(self, dropout, **kwargs):
+        super(Model4NoisyMaskedWide, self).__init__(dropout, **kwargs)
+        self.embed_layer = EmbeddingLayer1Wide()
+        self.mask = nn.Sequential(
+                FrequencyMasking(2),
+                TimeMasking(100)
+        )
+        self.noise = GaussianNoise(std=0.4)
+        self.lstm_layer = nn.LSTM(input_size=1024, hidden_size=1024, num_layers=4, bidirectional=True, batch_first=True,
+                                  dropout=dropout)
+        self.mlp = MLPLayer(1024 * 2, [2048, 2048], dropout)
+
+    def forward(self, x, seq_lengths):
+        return super(Model4NoisyMaskedWide, self).forward(x, seq_lengths)
+
+
 class Model5(Model3):
     def __init__(self, dropout, **kwargs):
         super(Model5, self).__init__(dropout, **kwargs)
@@ -378,13 +725,14 @@ class Model6(Model4Noisy):
 class Model7(Model6):
     def  __init__(self, dropout, **kwargs):
         super(Model7, self).__init__(dropout, **kwargs)
-        self.lstm_layer = nn.LSTM(input_size=256, hidden_size=256, num_layers=6, bidirectional=True, batch_first=True,
+        self.embed_layer = EmbeddingLayer4()
+        self.noise = GaussianNoise(std=0.4)
+        self.lstm_layer = nn.LSTM(input_size=512, hidden_size=512, num_layers=6, bidirectional=True, batch_first=True,
                                   dropout=dropout)
-        self.mlp = MLPLayer(256 * 2, [2048, 2048], dropout)
+        self.mlp = MLPLayer(512 * 2, [4096, 4096, 4096], dropout)
 
     def forward(self, x, seq_lengths):
        return super(Model7, self).forward(x, seq_lengths)
-
 
 
 # class Model4(Model3):
@@ -515,7 +863,7 @@ class Model1(torch.nn.Module):
         embed =  torch.nn.functional.relu(embed)
         # pack_padded_sequence requires (N, T, 13)
         # Since we are doning down-sampling ,the seq lengths change correspondingly.
-        down_sampled_seq_length = [(x - 3) // 4 for x in seq_lengths]
+        down_sampled_seq_length = [((x + 1) // 2 +1) //2 for x in seq_lengths]
         packed_embed = pack_padded_sequence(embed.transpose(1, 2), down_sampled_seq_length, batch_first=True,
                                             enforce_sorted=False)
 
@@ -535,7 +883,7 @@ def predict_string(model, batch_x, batch_seq_length, decoder):
     return best_seqs
 
 
-def output_result(model, beam_width=50):
+def output_result(model, beam_width=35):
     """
     Predict the result of our test set.
     Determine the output sequence by beam-searching.
@@ -557,8 +905,10 @@ def output_result(model, beam_width=50):
     df.to_csv("hw3p2_submission.csv", index=False)
 
 
-def train_epoch(training_loader, model, criterion, optimizer, scaler):
+def train_epoch(training_loader, model, criterion, optimizer, scaler, current_epoch, scheduler=None):
     total_training_loss = 0.0
+    total_batches = len(training_loader)
+    b = 0
     for (batch_x, batch_y), (batch_seq_lengths, batch_target_sizes) in training_loader:
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
@@ -574,6 +924,10 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler):
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
+        if scheduler is not None:
+            current_epoch = current_epoch + b / total_batches
+            scheduler.step(current_epoch)
+        b += 1
     training_loss_sum = "Training loss ", total_training_loss / len(training_loader)
     logger.debug(training_loss_sum)
     print(training_loss_sum)
@@ -601,9 +955,10 @@ def validate(model, validation_loader, criterion, decoder=None, compute_distance
             loss = criterion(y_hat.transpose(0, 1), batch_y, new_seq_length, batch_target_lengths)
             if compute_distance:
                 batch_string = predict_string(model, batch_x, batch_seq_lengths, decoder)
-                for y_hat_string, y in zip(batch_string, batch_y):
-                    y_string = ''.join([PHONEME_MAP[c] for c in y])
-                    total_distance += Levenshtein.distance(y_hat_string, y_string)
+                for y_hat_string, y, target_length in zip(batch_string, batch_y, batch_target_lengths):
+                    y_string = ''.join([PHONEME_MAP[c] for c in y[:target_length]])
+                    dist =  Levenshtein.distance(y_hat_string, y_string)
+                    total_distance += dist
             total_loss += (loss.item() * batch_size)
 
     # Return average loss
@@ -618,15 +973,15 @@ def get_model(model_name, model_param):
 def get_scheduler(optimizer, scheduler):
     if scheduler == 'StepLR':
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    elif scheduler == 'Cosine':
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, verbose=True)
     else:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=4, factor=0.2)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=4, factor=0.5, verbose=True)
     return scheduler
 
 
 def train(model, optimizer_params):
-    n_epochs = 150
-    print(model)
-    logger.debug(model)
+    n_epochs = optimizer_params['n_epochs']
 
     lr = optimizer_params.get("lr")
     warmup_epoch = optimizer_params.get("warmup")
@@ -637,28 +992,58 @@ def train(model, optimizer_params):
         lr = 0.002
     beam_width = optimizer_params.get("beam_width")
     if beam_width is None:
-        beam_width = 10
+        beam_width = 1
     train_loader = get_labeled_data_loader(train_data_dir, train_label_dir, training_batch_size)
     dev_loader = get_labeled_data_loader(dev_data_dir, dev_label_dir, val_batch_size)
     validation_decoder = CTCBeamDecoder(PHONEME_MAP, beam_width=beam_width, cutoff_top_n=41)
+
+    # When using pretrained model
+    # unfreezer = alter_lstm_layer(model,
+    #                             nn.LSTM(input_size=512, hidden_size=512, num_layers=8, bidirectional=True, batch_first=True, dropout=optimizer_params['dropout'])
+    #                         )
+        
+    print(model)
+    logger.debug(model)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = get_scheduler(optimizer, optimizer_params['scheduler'])
     scaler = torch.cuda.amp.GradScaler()
     ctc_loss = torch.nn.CTCLoss()
+
     for i in range(n_epochs):
-        train_epoch(train_loader, model, ctc_loss, optimizer, scaler)
-        validation_loss, validation_distance = validate(model, dev_loader, ctc_loss, validation_decoder)
+        # Increase dropout by 0.1 every 15 epochs
+        in_epoch_scheduler = scheduler if optimizer_params['scheduler'] == 'Cosine' else None
+        train_epoch(train_loader, model, ctc_loss, optimizer, scaler, current_epoch=i, scheduler=in_epoch_scheduler)
+        # if i == 15:
+        #     unfreezer()
+
+        if i % 10  == 0:
+            torch.save(training_model.state_dict(), "saved_model_hw3p2" + optimizer_params['model'])
+
+        if optimizer_params['scheduler'] == 'Cosine' and (i +1) % 5 != 0:
+            validation_loss, validation_distance = None, None
+        else:
+            validation_loss, validation_distance = validate(model, dev_loader, ctc_loss, validation_decoder, True)
+            # Early stop
+#            if validation_loss < 0.229:
+#                break
+
         validation_summary = f"Epoch {i}, validation_loss: {validation_loss}, validation_distance: {validation_distance}"
         print(validation_summary)
         logger.debug(validation_summary)
         # Warmup for the first 150 epochs:
-        scheduler.step(validation_loss)
+        if (i + 1) % 5 == 0 and optimizer_params['scheduler'] == 'Cosine':
+            scheduler.base_lrs[0] = scheduler.base_lrs[0] * 0.8
+            print(f"Half the learning rate {scheduler.base_lrs}")
+        elif optimizer_params['scheduler'] != 'Cosine':
+            print("Other scheduler")
+            scheduler.step(validation_distance)
     return model
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=['train', 'test'])
+    parser.add_argument("mode", choices=['train', 'retrain', 'test'])
     parser.add_argument("model")
     parser.add_argument("--lr", type=float)
     parser.add_argument("--warmup", type=int)
@@ -667,25 +1052,42 @@ if __name__ == "__main__":
     parser.add_argument("--scheduler", default="StepLR")
     parser.add_argument("--scheduler step size", type=int, default=5)
     parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument("--embed_dropout", type=float, default=0.2)
+    parser.add_argument("--noise_std", type=float, default=0.5)
+    parser.add_argument("--noise_prob", type=float, default=0.3)
+    parser.add_argument("--freq_mask", type=int, default=3)
+    parser.add_argument("--x_norm", action="store_true")
+    parser.add_argument("--time_mask", type=int, default=30)
+    parser.add_argument("--n_epochs", type=int, default=50)
+    parser.add_argument("--test_beam_width", type=int, default=35)
 
     args = parser.parse_args()
     training_params = vars(args)
     torch.cuda.empty_cache()
     model_params = {"cnn_channels": 128, "n_lstm_layers": 4, "bidirectional": True, "mlp_sizes": [2048],
-                    "dropout": args.dropout}
+                    "dropout": args.dropout, "noise_std": args.noise_std, "noise_prob": args.noise_prob,
+                    "freq_mask": args.freq_mask, "time_mask": args.time_mask, "embed_dropout": args.embed_dropout,
+                    "x_norm": args.x_norm}
+
     model_params_str = f"({', '.join(['='.join([str(k), str(v)]) for k, v in model_params.items()])})"
     model_name = args.model
     training_model = eval(model_name + model_params_str)
     logger.debug("===================================================================================================")
     logger.debug(training_params)
     print(training_params)
+
+    path = args.model_path
+    if path is None:
+        path = "saved_model_hw3p2" + args.model
+
     if args.mode == 'train':
         training_model = train(training_model, training_params)
         torch.save(training_model.state_dict(), "saved_model_hw3p2" + args.model)
+    elif args.mode == 'retrain':
+        training_model.load_state_dict(torch.load(path))
+        training_model = train(training_model, training_params)
+        torch.save(training_model.state_dict(), "saved_model_hw3p2" + args.model)
     else:
-        path = args.model_path
-        if path is None:
-            path = "saved_model_hw3p2" + args.model
         training_model.load_state_dict(torch.load(path))
 
-    output_result(training_model)
+    output_result(training_model, args.test_beam_width)
