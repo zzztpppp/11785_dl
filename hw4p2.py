@@ -76,6 +76,7 @@ class UnlabeledDataset(Dataset):
         batch_seq_lengths = [l for (_, l) in batch]
         return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
+
 class PyramidLSTM(nn.Module):
     """
     The pyramid-lstm block reduce input's time-step by half and feed into a
@@ -93,8 +94,7 @@ class PyramidLSTM(nn.Module):
     def forward(self, batch_x, seq_lengths):
         # Reduce the sequence length by 2
         max_seq_length = batch_x.shape[1]
-
-
+        pass
 
 class Listener(nn.Module):
     """
