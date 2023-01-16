@@ -93,8 +93,70 @@ class PyramidLSTM(nn.Module):
 
     def forward(self, batch_x, seq_lengths):
         # Reduce the sequence length by 2
-        max_seq_length = batch_x.shape[1]
-        pass
+        batch_x_resized, seq_lengths_resized = self.reduce_length(batch_x, seq_lengths)
+        packed_data = pack_padded_sequence(batch_x_resized, seq_lengths_resized, batch_first=True, enforce_sorted=False)
+        packed_out = self.layer.forward(packed_data)
+        padded_out, _ = pad_packed_sequence(packed_out, batch_first=True)
+        return padded_out, seq_lengths_resized
+
+    @staticmethod
+    def reduce_length(batch_x: torch.tensor, seq_lengths: list) -> (torch.tensor, list):
+        batch_size, max_length, hidden_size = batch_x.shape
+        batch_resized = torch.zeros(
+            batch_size,
+            max_length // 2,
+            hidden_size * 2,
+            dtype=batch_x.dtype,
+            layout=batch_x.layout,
+            device=batch_x.device,
+            requires_grad=True
+        )
+
+        resized_lengths = []
+        for i, length in enumerate(seq_lengths):
+            # Drop last step if length is odd
+            length = length - (length % 2)
+            resized_length = length // 2
+            resized = batch_x[i, :length, :].reshape((resized_length, hidden_size * 2))   # (L // 2, H * 2)
+            batch_resized[i, :, :]  = resized
+            resized_lengths.append(resized_length)
+
+        return batch_resized, resized_lengths
+
+
+class PyLSTMEncoder(nn.Module):
+    def __init__(self, input_size, hidden_size, layers):
+        """
+        The final output size is (hidden_size * (2 ** layers ))
+        :param input_size:
+        :param hidden_size:
+        :param layers:
+        """
+        super().__init__()
+        self.b_lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size // 2, bidirectional=True, batch_first=True)
+        # Since each p-lstm is also bidirectional, the output size
+        # is x4 the input size given that adjacent time-steps are concatenated.
+        self.p_lstms = nn.ModuleList()
+        for i in range(layers):
+            p_hidden_size = hidden_size * (2 ** i)
+            self.p_lstms.append(
+                nn.LSTM(
+                    input_size=p_hidden_size,
+                    hidden_size= p_hidden_size // 2,
+                    batch_first=True,
+                    bidirectional=True
+                )
+            )
+
+    def forward(self, batch_x, seq_lengths):
+        packed_x = pack_padded_sequence(batch_x, seq_lengths, batch_first=True, enforce_sorted=False)
+        packed_b_out, _ = self.b_lstm.forward(packed_x)
+        padded_b_out, _ = pad_packed_sequence(packed_b_out, batch_first=True)
+        p_input, p_size = padded_b_out, seq_lengths
+        for p_lstm in self.p_lstms:
+            p_input, p_size = p_lstm.forward(p_input, p_size)
+        return p_input, p_size
+
 
 class Listener(nn.Module):
     """
