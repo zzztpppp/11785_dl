@@ -1,8 +1,40 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.nn.functional import softmax
+
+
+class ResidualBlock1D(torch.nn.Module):
+    """"
+    Residual block that makes up the embedding layer
+    """
+
+    def __init__(self, input_channels, output_channels, kernel_size, stride=1):
+        super(ResidualBlock1D, self).__init__()
+        self.conv_layer = nn.Sequential(
+            nn.Conv1d(in_channels=input_channels, out_channels=output_channels, kernel_size=kernel_size, stride=stride,
+                      padding=(kernel_size - 1) // 2),
+            nn.BatchNorm1d(output_channels),
+            nn.ReLU(),
+            nn.Conv1d(in_channels=output_channels, out_channels=output_channels, kernel_size=kernel_size, stride=1,
+                      padding=(kernel_size - 1) // 2),
+            nn.BatchNorm1d(output_channels)
+        )
+
+        # Transform the input to match the size of the output
+        if stride != 1 or input_channels != output_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels=input_channels, out_channels=output_channels, kernel_size=1, stride=stride),
+                nn.BatchNorm1d(output_channels)
+            )
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x):
+        out = self.conv_layer(x)
+        residual = self.shortcut(x)
+        return torch.nn.functional.relu(out + residual)
+
 
 
 class PyramidLSTM(nn.Module):
@@ -122,7 +154,22 @@ class Listener(nn.Module):
     Listener consists of 1D cnn and some specified layers of lstms
     """
 
-    def __init__(self, lstm_layers, input_size, initial_hidden_size, reduce=None):
+    def __init__(self, input_size, initial_hidden_size, reduce_factor):
         super().__init__()
         # The first layer doesn't reduce the number of times steps/
         # The rest each reduces the number of time steps by a factor
+        self.cnn = torch.nn.Sequential(
+            ResidualBlock1D(input_size, initial_hidden_size, kernel_size=3),
+            ResidualBlock1D(initial_hidden_size, initial_hidden_size, kernel_size=3)
+        )
+        self.pyramid_encoder = PyLSTMEncoder(initial_hidden_size, initial_hidden_size, reduce_factor)
+
+    def forward(self, x, seq_lenghts):
+       embeded_seq, embeded_seq_length = self.pyramid_encoder.forward(
+           self.cnn.forward(x.transpose(1, 2)).transpose(1, 2), seq_lenghts
+       )
+       return embeded_seq, embeded_seq_length
+
+
+
+
