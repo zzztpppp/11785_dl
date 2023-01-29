@@ -55,3 +55,6 @@ VOCAB = ['<sos>',
          'U',   'V',    'W',    'X',
          'Y',   'Z',    "'",    ' ',
          '<eos>']
+
+SOS_TOKEN = 0
+EOS_TOKEN = len(VOCAB) - 1
