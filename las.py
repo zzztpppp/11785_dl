@@ -103,7 +103,7 @@ class PyLSTMEncoder(nn.Module):
             self.p_lstms.append(
                 PyramidLSTM(
                     input_size=p_hidden_size,
-                    hidden_size= p_hidden_size // 2,
+                    hidden_size=p_hidden_size // 2,
                 )
             )
 
@@ -135,14 +135,14 @@ class Attention(nn.Module):
         batch_size, max_length, hidden_size = embedding_seq.shape
         keys = self._key_mlp.forward(embedding_seq)  # (batch, max_length, key_dim)
         values = self._value_mlp.forward(embedding_seq)  # (batch, max_length, val_dim)
-        weights = torch.zeros(batch_size, max_length, device=query.device, dtype=query.dtype, requires_grad=True)
+        weights = torch.zeros(batch_size, max_length, device=query.device, dtype=query.dtype)
         # For each query in the batch, compute
         # its context.
         for b in range(batch_size):
             seq_length = batch_seq_lengths[b]
             query_b = query[b][:, None]
             key_b = keys[b, :seq_length, :]
-            weights_b = softmax(torch.matmul(key_b, query_b) / torch.sqrt(hidden_size), dim=0) # (seq_length, 1)
+            weights_b = softmax(torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size)), dim=0)  # (seq_length, 1)
             weights[b, :seq_length] = weights_b.squeeze()
         context = (values * weights[:, :, None]).sum(dim=1)
         return context, weights
@@ -164,10 +164,10 @@ class Listener(nn.Module):
         self.pyramid_encoder = PyLSTMEncoder(initial_hidden_size, initial_hidden_size, reduce_factor)
 
     def forward(self, x, seq_lenghts):
-       embeded_seq, embeded_seq_length = self.pyramid_encoder.forward(
-           self.cnn.forward(x.transpose(1, 2)).transpose(1, 2), seq_lenghts
-       )
-       return embeded_seq, embeded_seq_length
+        embeded_seq, embeded_seq_length = self.pyramid_encoder.forward(
+            self.cnn.forward(x.transpose(1, 2)).transpose(1, 2), seq_lenghts
+        )
+        return embeded_seq, embeded_seq_length
 
 
 class Speller(nn.Module):
@@ -175,47 +175,44 @@ class Speller(nn.Module):
         super().__init__()
 
         self.hidden_size = hidden_size
+        self.output_size = output_size
         self.char_embedding_size = char_embedding_size
         self.seq_embedding_size = seq_embedding_size
         self.attend_layer = Attention(hidden_size, hidden_size)
         self.char_embedding = nn.Embedding(output_size, char_embedding_size)
-        self.decoder = nn.LSTMCell(char_embedding_size, hidden_size)
+        self.decoder = nn.LSTMCell(hidden_size + seq_embedding_size, hidden_size)
         self.cdn = nn.Linear(hidden_size + seq_embedding_size, output_size)
 
     def spell_step(self, batch_prev_y, hx, prev_context):
         # TODO: use 2 LSTMCell as per the paper
         y_embeddings = self.char_embedding.forward(batch_prev_y)
         lstm_inputs = torch.concat([y_embeddings, prev_context], dim=1)
-        lstm_out, hx = self.decoder.forward(lstm_inputs, hx)
+        hx = self.decoder.forward(lstm_inputs, hx)
         return hx
 
     def forward(self, seq_embeddings, seq_embedding_lengths):
-        if self.training:
-            raise ValueError("This class is used only under evaluation mode")
         batch_size = seq_embeddings.shape[0]
         max_decode_length = 600
-        prev_y = torch.zeros(batch_size, self.hidden_size, dtype=seq_embeddings.dtype, device=seq_embeddings.device)
+        prev_y = torch.zeros(batch_size, dtype=torch.long, device=seq_embeddings.device)
         hx = None
-        prev_context = self.attend_layer.forward(
+        prev_context, _ = self.attend_layer.forward(
             torch.zeros(batch_size, self.hidden_size),
             seq_embeddings,
             seq_embedding_lengths
         )
-        packed_seq_embeddings = pack_padded_sequence(
-            seq_embeddings,
-            seq_embedding_lengths,
-            batch_first=True,
-            enforce_sorted=False
-        )
-
+        cdn_out = torch.zeros(
+            batch_size,
+            max_decode_length, self.output_size, dtype=seq_embeddings.dtype, device=seq_embeddings.device)
         for i in range(max_decode_length):
-            query_i = self.spell_step(prev_y, hx, prev_context)
-            prev_context = self.attend_layer.forward(query_i, seq_embeddings, seq_embedding_lengths)
+            hx = self.spell_step(prev_y, hx, prev_context)
+            current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
+            cdn_inputs = torch.concat([hx[0], current_context], dim=1)
+            cdn_out_i = self.cdn.forward(cdn_inputs)
+            cdn_out[:, i, :] = cdn_out_i
+            prev_context = current_context
 
-
+        return cdn_out
 
     @staticmethod
-    def random_decode(seq_distribution):
+    def random_decode(cdn_out):
         pass
-
-

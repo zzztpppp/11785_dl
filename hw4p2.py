@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.nn.functional import softmax, log_softmax
 from phonetics import VOCAB
-from las import Listener, Attention
+from las import Listener, Attention, Speller
 import os
 
 training_x_dir = os.path.join("train-clean-100", "mfcc")
@@ -124,9 +124,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     data = get_labeled_data_loader(args.data_root, dev_x_dir, dev_y_dir, batch_size=4,
                                    collate_fn=LabeledDataset.collate_fn)
-    model = Listener(15, 32, 3)
+    lister_model = Listener(15, 32, 3)
+    speller_model = Speller(256, 256, 256, len(VOCAB))
     (x, _), (seq_lengths, _) = next(iter(data))
-    down_sampled_x, down_sampled_length = model.forward(x, seq_lengths)
-    attention_model = Attention(256, 256)
-    atttention = attention_model.forward()
+    down_sampled_x, down_sampled_length = lister_model.forward(x, seq_lengths)
+    speller_model.forward(down_sampled_x, down_sampled_length)
     print("done")
