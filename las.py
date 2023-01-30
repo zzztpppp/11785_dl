@@ -1,7 +1,6 @@
-import numpy as np
+import random
 import torch
 import torch.nn as nn
-import typing as t
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.nn.functional import softmax
 from phonetics import SOS_TOKEN, EOS_TOKEN
@@ -142,7 +141,10 @@ class Attention(nn.Module):
             seq_length = batch_seq_lengths[b]
             query_b = query[b][:, None]
             key_b = keys[b, :seq_length, :]
-            weights_b = softmax(torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size)), dim=0)  # (seq_length, 1)
+            weights_b = softmax(
+                torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size)),
+                dim=0
+            )  # (seq_length, 1)
             weights[b, :seq_length] = weights_b.squeeze()
         context = (values * weights[:, :, None]).sum(dim=1)
         return context, weights
@@ -190,29 +192,72 @@ class Speller(nn.Module):
         hx = self.decoder.forward(lstm_inputs, hx)
         return hx
 
+    def teacher_forced_forward(self, seq_embeddings, seq_embedding_lengths, batch_y, teach_rate=0.9):
+        """
+        Used during the training phase
+        :param teach_rate:
+        :param seq_embeddings:
+        :param seq_embedding_lengths
+        :param batch_y: True sequence
+        :return:
+        """
+        batch_size, max_length, _ = seq_embedding_lengths.shape
+        prev_y = batch_y[:, 0, :]
+        prev_context, _ = self.attend_layer.forward(
+            torch.zeros(batch_size, self.hidden_size),
+            seq_embeddings,
+            seq_embedding_lengths
+        )
+        hx = None
+        output_logits = torch.zeros(
+            batch_size,
+            max_length,
+            self.output_size,
+            dtype=seq_embeddings.dtype,
+            device=seq_embeddings.device
+        )
+        for t in range(1, max_length):
+            hx = self.spell_step(prev_y, hx, prev_context)
+            current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
+            cdn_inputs = torch.concat([hx[0], current_context], dim=1)
+            cdn_out_t = self.cdn.forward(cdn_inputs)  # (batch, output_size)
+            y_t = self.random_decode(cdn_out_t)
+            output_logits[:, t, ]
+            if random.random() > teach_rate:
+                # Use the current model output as the next timestep input
+                prev_y = y_t
+            else:
+                # Use the ground truth as the next timestep input
+                prev_y = batch_y[:, t, :]
+
+        return output_symbols
+
     def forward(self, seq_embeddings, seq_embedding_lengths):
         batch_size = seq_embeddings.shape[0]
         max_decode_length = 600
         prev_y = torch.zeros(batch_size, dtype=torch.long, device=seq_embeddings.device)
+        prev_y[:] = SOS_TOKEN
         hx = None
         prev_context, _ = self.attend_layer.forward(
             torch.zeros(batch_size, self.hidden_size),
             seq_embeddings,
             seq_embedding_lengths
         )
-        cdn_out = torch.zeros(
-            batch_size,
-            max_decode_length, self.output_size, dtype=seq_embeddings.dtype, device=seq_embeddings.device)
+        output_symbols = torch.zeros(batch_size, max_decode_length, dtype=torch.long, device=seq_embeddings.device)
         for i in range(max_decode_length):
             hx = self.spell_step(prev_y, hx, prev_context)
             current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
-            cdn_out_i = self.cdn.forward(cdn_inputs)
-            cdn_out[:, i, :] = cdn_out_i
+            cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
+            y_i = self.random_decode(cdn_out_i)
+            output_symbols[:, i] = y_i
             prev_context = current_context
+            prev_y = y_i
 
-        return cdn_out
+        return output_symbols
 
     @staticmethod
     def random_decode(cdn_out):
-        pass
+        probs = torch.softmax(cdn_out, dim=-1)
+        samples = torch.multinomial(probs, 1).squeeze(-1)
+        return samples

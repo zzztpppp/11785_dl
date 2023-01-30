@@ -101,7 +101,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         model.train()
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            outputs, new_seq_length = model(batch_x, batch_seq_lengths)
+            output_symbols = model(batch_x, batch_seq_lengths)
             # CTC loss requires (L B, C) so we transpose
             loss = criterion(log_softmax(outputs.transpose(0, 1), dim=2), batch_y, new_seq_length, batch_target_sizes)
         total_training_loss += float(loss)
@@ -128,5 +128,5 @@ if __name__ == "__main__":
     speller_model = Speller(256, 256, 256, len(VOCAB))
     (x, _), (seq_lengths, _) = next(iter(data))
     down_sampled_x, down_sampled_length = lister_model.forward(x, seq_lengths)
-    speller_model.forward(down_sampled_x, down_sampled_length)
+    samples = speller_model.forward(down_sampled_x, down_sampled_length)
     print("done")
