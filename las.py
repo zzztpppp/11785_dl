@@ -132,6 +132,8 @@ class Attention(nn.Module):
         :return:
         """
         batch_size, max_length, hidden_size = embedding_seq.shape
+        print(embedding_seq.shape)
+        print(self._hidden_dim, self._key_dim)
         keys = self._key_mlp.forward(embedding_seq)  # (batch, max_length, key_dim)
         values = self._value_mlp.forward(embedding_seq)  # (batch, max_length, val_dim)
         weights = torch.zeros(batch_size, max_length, device=query.device, dtype=query.dtype)
@@ -241,7 +243,7 @@ class Speller(nn.Module):
         prev_y[:] = SOS_TOKEN
         hx = None
         prev_context, _ = self.attend_layer.forward(
-            torch.zeros(batch_size, self.hidden_size),
+            torch.zeros(batch_size, self.hidden_size, device=seq_embeddings.device, dtype=seq_embeddings.dtype),
             seq_embeddings,
             seq_embedding_lengths
         )
@@ -292,7 +294,8 @@ class LAS(nn.Module):
 
     def teacher_forced_forward(self, seq_x, seq_lengths, seq_y):
         seq_embeddings, seq_embedding_lengths = self.listener.forward(seq_x, seq_lengths)
-        output_logits = self.speller.teacher_forced_forward(seq_x, seq_lengths, seq_y, teach_rate=self.tf_rate)
+        output_logits = self.speller.teacher_forced_forward(seq_embeddings, seq_embedding_lengths, seq_y,
+                                                            teach_rate=self.tf_rate)
         return output_logits
 
     def forward(self, seq_x, seq_lengths):
