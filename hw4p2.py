@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.nn.functional import softmax, log_softmax
 from phonetics import VOCAB
-from las import Listener, Attention, Speller
+from las import Listener, Attention, Speller, LAS
 import os
 
 training_x_dir = os.path.join("train-clean-100", "mfcc")
@@ -94,18 +94,34 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
     total_training_loss = 0.0
     total_batches = len(training_loader)
     b = 0
-    for (batch_x, batch_y), (batch_seq_lengths, batch_target_sizes) in training_loader:
+    for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in training_loader:
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
         model.to(device)
         model.train()
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            output_symbols = model(batch_x, batch_seq_lengths)
-            # CTC loss requires (L B, C) so we transpose
-            loss = criterion(log_softmax(outputs.transpose(0, 1), dim=2), batch_y, new_seq_length, batch_target_sizes)
-        total_training_loss += float(loss)
+            output_logits = model(batch_x, batch_seq_lengths)
 
+            # We don't include <sos> when compute the loss
+            batch_target_lengths = [l - 1 for l in batch_target_lengths]
+            packed_logits = pack_padded_sequence(
+                output_logits[:, 1:, :],
+                batch_target_lengths,
+                batch_first=True,
+                enforce_sorted=False
+            )
+            packed_targets = pack_padded_sequence(
+                batch_y[:, 1:],
+                batch_target_lengths,
+                batch_first=True,
+                enforce_sorted=False
+            )
+
+            # CTC loss requires (L B, C) so we transpose
+            loss = criterion(packed_targets.data, packed_logits.data)
+
+        total_training_loss += float(loss)
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -113,8 +129,30 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
             current_epoch = current_epoch + b / total_batches
             scheduler.step(current_epoch)
         b += 1
+
     training_loss_sum = "Training loss ", total_training_loss / len(training_loader)
     print(training_loss_sum)
+
+    def train_las(params: dict):
+        model = LAS(
+            params['char_embedding_size'],
+            params['seq_embedding_size'],
+            len(VOCAB),
+            params['plstm_layers'],
+            params['tf_rate']
+        )
+
+        n_epochs = params["n_epochs"]
+        data_root = params["data_root"]
+        training_loader = get_labeled_data_loader(data_root, training_x_dir, training_y_dir)
+        val_loader = get_labeled_data_loader(data_root, dev_x_dir, dev_y_dir)
+        optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
+        criterion = torch.nn.CrossEntropyLoss()
+        scaler = torch.cuda.amp.GradScaler()
+        for epoch in range(n_epochs):
+            train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
+
+
 
 
 if __name__ == "__main__":
@@ -126,7 +164,7 @@ if __name__ == "__main__":
                                    collate_fn=LabeledDataset.collate_fn)
     lister_model = Listener(15, 32, 3)
     speller_model = Speller(256, 256, 256, len(VOCAB))
-    (x, _), (seq_lengths, _) = next(iter(data))
+    (x, y), (seq_lengths, target_lengths) = next(iter(data))
     down_sampled_x, down_sampled_length = lister_model.forward(x, seq_lengths)
-    samples = speller_model.forward(down_sampled_x, down_sampled_length)
+    samples = speller_model.teacher_forced_forward(down_sampled_x, down_sampled_length, y)
     print("done")

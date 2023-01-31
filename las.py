@@ -201,8 +201,8 @@ class Speller(nn.Module):
         :param batch_y: True sequence
         :return:
         """
-        batch_size, max_length, _ = seq_embedding_lengths.shape
-        prev_y = batch_y[:, 0, :]
+        batch_size, max_length, _ = seq_embeddings.shape
+        prev_y = batch_y[:, 0]
         prev_context, _ = self.attend_layer.forward(
             torch.zeros(batch_size, self.hidden_size),
             seq_embeddings,
@@ -211,26 +211,28 @@ class Speller(nn.Module):
         hx = None
         output_logits = torch.zeros(
             batch_size,
-            max_length,
+            max_length,   # The output doesn't contain <sos>
             self.output_size,
             dtype=seq_embeddings.dtype,
             device=seq_embeddings.device
         )
+
         for t in range(1, max_length):
             hx = self.spell_step(prev_y, hx, prev_context)
             current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
             cdn_out_t = self.cdn.forward(cdn_inputs)  # (batch, output_size)
             y_t = self.random_decode(cdn_out_t)
-            output_logits[:, t, ]
+            output_logits[:, t, :] = cdn_out_t
             if random.random() > teach_rate:
                 # Use the current model output as the next timestep input
                 prev_y = y_t
             else:
                 # Use the ground truth as the next timestep input
-                prev_y = batch_y[:, t, :]
+                prev_y = batch_y[:, t]
 
-        return output_symbols
+        # Returning logits for loss computation
+        return output_logits
 
     def forward(self, seq_embeddings, seq_embedding_lengths):
         batch_size = seq_embeddings.shape[0]
@@ -261,3 +263,39 @@ class Speller(nn.Module):
         probs = torch.softmax(cdn_out, dim=-1)
         samples = torch.multinomial(probs, 1).squeeze(-1)
         return samples
+
+
+class LAS(nn.Module):
+    def __init__(self, char_embedding_size, seq_embedding_size, output_size, plstm_layers, teacher_force_rate):
+        """
+        A composite model that consists of a listner and a speller.
+
+        Note: Each layer of plstm reduces the number of input time-step by
+        a factor of and increase final sequence embedding size by a factor of 2.
+        So the sequence embedding size output by the lister is `seq_embedding_size` * (2 ** plstm_layers)
+
+        :param char_embedding_size:  Size for each input character embedding
+        :param seq_embedding_size: Size for each sequence embedding.
+        :param output_size: Size of the vocabulary bag.
+        :param plstm_layers: Number of pyramid lstm layers.
+        :param teacher_force_rate: Initial teacher force rate during training.
+        """
+        super().__init__()
+        self.listener = Listener(15, seq_embedding_size, plstm_layers)
+        self.speller = Speller(
+            seq_embedding_size * (2 ** plstm_layers),
+            char_embedding_size,
+            char_embedding_size,
+            output_size
+        )
+        self.tf_rate = teacher_force_rate
+
+    def teacher_forced_forward(self, seq_x, seq_lengths, seq_y):
+        seq_embeddings, seq_embedding_lengths = self.listener.forward(seq_x, seq_lengths)
+        output_logits = self.speller.teacher_forced_forward(seq_x, seq_lengths, seq_y, teach_rate=self.tf_rate)
+        return output_logits
+
+    def forward(self, seq_x, seq_lengths):
+        seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
+        outputs = self.speller.forward(seq_embeddings, seq_embeddings_lengths)
+        return outputs
