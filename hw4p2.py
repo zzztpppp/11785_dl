@@ -145,19 +145,22 @@ def train_las(params: dict):
 
     n_epochs = params["n_epochs"]
     data_root = params["data_root"]
+    num_workers = params["num_dataloader_workers"]
     training_loader = get_labeled_data_loader(
         data_root,
         training_x_dir,
         training_y_dir,
         shuffle=True,
-        batch_size=params["training_batch_size"]
+        batch_size=params["training_batch_size"],
+        num_workers=num_workers
     )
     val_loader = get_labeled_data_loader(
         data_root,
         dev_x_dir,
         dev_y_dir,
         shuffle=False,
-        batch_size=params["validation_batch_size"]
+        batch_size=params["validation_batch_size"],
+        num_workers=num_workers
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
     criterion = torch.nn.CrossEntropyLoss()
@@ -171,6 +174,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("data_root", type=str)
     parser.add_argument("--n_epochs", type=int, default=50)
+    parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
     parser.add_argument("--validation_batch_size", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=0.001)
