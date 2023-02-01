@@ -142,7 +142,7 @@ class Attention(nn.Module):
             query_b = query[b][:, None]
             key_b = keys[b, :seq_length, :]
             weights_b = softmax(
-                torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size)),
+                torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size).to(embedding_seq.device)),
                 dim=0
             )  # (seq_length, 1)
             weights[b, :seq_length] = weights_b.squeeze()
@@ -201,10 +201,14 @@ class Speller(nn.Module):
         :param batch_y: True sequence
         :return:
         """
-        batch_size, max_length, _ = seq_embeddings.shape
+        batch_size, max_length = batch_y.shape
         prev_y = batch_y[:, 0]
         prev_context, _ = self.attend_layer.forward(
-            torch.zeros(batch_size, self.hidden_size),
+            torch.zeros(batch_size,
+                        self.hidden_size,
+                        dtype=seq_embeddings.dtype,
+                        device=seq_embeddings.device
+                        ),
             seq_embeddings,
             seq_embedding_lengths
         )
@@ -241,7 +245,12 @@ class Speller(nn.Module):
         prev_y[:] = SOS_TOKEN
         hx = None
         prev_context, _ = self.attend_layer.forward(
-            torch.zeros(batch_size, self.hidden_size),
+            torch.zeros(
+                batch_size,
+                self.hidden_size,
+                device=seq_embeddings.device,
+                dtype=seq_embeddings.dtyype
+            ),
             seq_embeddings,
             seq_embedding_lengths
         )
@@ -292,7 +301,8 @@ class LAS(nn.Module):
 
     def teacher_forced_forward(self, seq_x, seq_lengths, seq_y):
         seq_embeddings, seq_embedding_lengths = self.listener.forward(seq_x, seq_lengths)
-        output_logits = self.speller.teacher_forced_forward(seq_x, seq_lengths, seq_y, teach_rate=self.tf_rate)
+        output_logits = self.speller.teacher_forced_forward(seq_embeddings, seq_embedding_lengths
+                                                            , seq_y, teach_rate=self.tf_rate)
         return output_logits
 
     def forward(self, seq_x, seq_lengths):

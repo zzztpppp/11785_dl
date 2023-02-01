@@ -23,7 +23,7 @@ def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
     x_dir = os.path.join(data_root, x_dir)
     y_dir = os.path.join(data_root, y_dir)
     dataset = LabeledDataset(x_dir, y_dir)
-    data_loader = DataLoader(dataset, **kwargs)
+    data_loader = DataLoader(dataset, collate_fn=LabeledDataset.collate_fn, pin_memory=True, **kwargs)
     return data_loader
 
 
@@ -101,7 +101,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         model.train()
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            output_logits = model(batch_x, batch_seq_lengths)
+            output_logits = model.teacher_forced_forward(batch_x, batch_seq_lengths, batch_y)
 
             # We don't include <sos> when compute the loss
             batch_target_lengths = [l - 1 for l in batch_target_lengths]
@@ -119,7 +119,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
             )
 
             # CTC loss requires (L B, C) so we transpose
-            loss = criterion(packed_targets.data, packed_logits.data)
+            loss = criterion(packed_logits.data, packed_targets.data)
 
         total_training_loss += float(loss)
         scaler.scale(loss).backward()
@@ -133,38 +133,52 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
     training_loss_sum = "Training loss ", total_training_loss / len(training_loader)
     print(training_loss_sum)
 
-    def train_las(params: dict):
-        model = LAS(
-            params['char_embedding_size'],
-            params['seq_embedding_size'],
-            len(VOCAB),
-            params['plstm_layers'],
-            params['tf_rate']
-        )
 
-        n_epochs = params["n_epochs"]
-        data_root = params["data_root"]
-        training_loader = get_labeled_data_loader(data_root, training_x_dir, training_y_dir)
-        val_loader = get_labeled_data_loader(data_root, dev_x_dir, dev_y_dir)
-        optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
-        criterion = torch.nn.CrossEntropyLoss()
-        scaler = torch.cuda.amp.GradScaler()
-        for epoch in range(n_epochs):
-            train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
+def train_las(params: dict):
+    model = LAS(
+        params['char_embedding_size'],
+        params['seq_embedding_size'],
+        len(VOCAB),
+        params['plstm_layers'],
+        params['tf_rate']
+    )
 
-
+    n_epochs = params["n_epochs"]
+    data_root = params["data_root"]
+    training_loader = get_labeled_data_loader(
+        data_root,
+        training_x_dir,
+        training_y_dir,
+        shuffle=True,
+        batch_size=params["training_batch_size"]
+    )
+    val_loader = get_labeled_data_loader(
+        data_root,
+        dev_x_dir,
+        dev_y_dir,
+        shuffle=False,
+        batch_size=params["validation_batch_size"]
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
+    criterion = torch.nn.CrossEntropyLoss()
+    scaler = torch.cuda.amp.GradScaler()
+    for epoch in range(n_epochs):
+        train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
 
 
 if __name__ == "__main__":
     # The input size is typically (batch_size, max_seq_length, 15)
     parser = argparse.ArgumentParser()
     parser.add_argument("data_root", type=str)
+    parser.add_argument("--n_epochs", type=int, default=50)
+    parser.add_argument("--training_batch_size", type=int, default=32)
+    parser.add_argument("--validation_batch_size", type=int, default=1024)
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--char_embedding_size", type=int, default=256)
+    parser.add_argument("--seq_embedding_size", type=int, default=32)
+    parser.add_argument("--plstm_layers", type=int, default=3)
+    parser.add_argument("--tf_rate", type=float, default=1.0)
     args = parser.parse_args()
-    data = get_labeled_data_loader(args.data_root, dev_x_dir, dev_y_dir, batch_size=4,
-                                   collate_fn=LabeledDataset.collate_fn)
-    lister_model = Listener(15, 32, 3)
-    speller_model = Speller(256, 256, 256, len(VOCAB))
-    (x, y), (seq_lengths, target_lengths) = next(iter(data))
-    down_sampled_x, down_sampled_length = lister_model.forward(x, seq_lengths)
-    samples = speller_model.teacher_forced_forward(down_sampled_x, down_sampled_length, y)
+    train_las(vars(args))
     print("done")
