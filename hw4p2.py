@@ -1,12 +1,12 @@
 import numpy as np
 import torch
 import argparse
-from torch.utils.data import DataLoader, Dataset
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from torch.nn.functional import softmax, log_softmax
-from phonetics import VOCAB
-from las import Listener, Attention, Speller, LAS
 import os
+from tqdm import tqdm
+from torch.utils.data import DataLoader, Dataset
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
+from phonetics import VOCAB
+from las import LAS
 
 training_x_dir = os.path.join("train-clean-100", "mfcc")
 training_y_dir = os.path.join("train-clean-100",  "transcript", "raw")
@@ -94,7 +94,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
     total_training_loss = 0.0
     total_batches = len(training_loader)
     b = 0
-    for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in training_loader:
+    for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(training_loader):
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
         model.to(device)
@@ -166,7 +166,7 @@ def train_las(params: dict):
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs):
-        train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
+        train_epoch(val_loader, model, criterion, optimizer, scaler, epoch)
 
 
 if __name__ == "__main__":
