@@ -7,6 +7,7 @@ import os
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
+from torch.nn.functional import cross_entropy
 from phonetics import VOCAB
 from las import LAS
 
@@ -103,7 +104,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         model.train()
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            output_logits = model.teacher_forced_forward(batch_x, batch_seq_lengths, batch_y)
+            output_logits = model.forward(batch_x, batch_seq_lengths, batch_y)
 
             # We don't include <sos> when compute the loss
             batch_target_lengths = [l - 1 for l in batch_target_lengths]
@@ -134,6 +135,20 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
 
     training_loss_sum = "Training loss ", total_training_loss / len(training_loader)
     print(training_loss_sum)
+
+
+def validate(model: torch.nn.Module, dev_loader):
+    model.eval()
+    total_loss = 0.0
+    with torch.inference_mode():
+        for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(dev_loader):
+            logits, symbols = model.forward(batch_x, batch_seq_lengths)
+            packed_logits = pack_padded_sequence(logits, batch_target_lengths, batch_first=True, enforce_sorted=False)
+            packed_y =  pack_padded_sequence(batch_y, batch_target_lengths, batch_first=True, enforce_sorted=False)
+            loss = cross_entropy(packed_logits, packed_y)
+            total_loss += loss
+
+    return total_loss
 
 
 def train_las(params: dict):
@@ -169,6 +184,9 @@ def train_las(params: dict):
     scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
+        if epoch + 1 % 3 == 0:
+            val_loss = validate(model, val_loader)
+            print(f"Validation loss: {val_loss}")
 
 
 if __name__ == "__main__":
