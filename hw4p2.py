@@ -96,12 +96,12 @@ class UnlabeledDataset(Dataset):
 def train_epoch(training_loader, model, criterion, optimizer, scaler, current_epoch, scheduler=None):
     total_training_loss = 0.0
     total_batches = len(training_loader)
+    model.train()
     b = 0
     for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(training_loader):
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
         model.to(device)
-        model.train()
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
             output_logits = model.forward(batch_x, batch_seq_lengths, batch_y)
@@ -139,13 +139,16 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
 
 def validate(model: torch.nn.Module, dev_loader):
     model.eval()
+    model = model.to(device)
     total_loss = 0.0
     with torch.inference_mode():
         for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(dev_loader):
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
             logits, symbols = model.forward(batch_x, batch_seq_lengths)
             packed_logits = pack_padded_sequence(logits, batch_target_lengths, batch_first=True, enforce_sorted=False)
             packed_y =  pack_padded_sequence(batch_y, batch_target_lengths, batch_first=True, enforce_sorted=False)
-            loss = cross_entropy(packed_logits, packed_y)
+            loss = cross_entropy(packed_logits.data, packed_y.data)
             total_loss += loss
 
     return total_loss
