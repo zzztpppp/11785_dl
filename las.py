@@ -1,6 +1,7 @@
 import random
 import torch
 import torch.nn as nn
+import time
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from torch.nn.functional import softmax
 from phonetics import SOS_TOKEN, EOS_TOKEN
@@ -306,6 +307,11 @@ class LAS(nn.Module):
         return output_logits
 
     def forward(self, seq_x, seq_lengths):
+        start = time.time()
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
+        end_1 = time.time()
+        print(f"listen forward elapsed time {end_1 - start}")
         outputs = self.speller.forward(seq_embeddings, seq_embeddings_lengths)
+        end_2 = time.time()
+        print(f"speller forward elapsed time {end_2 - end_2}")
         return outputs
