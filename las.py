@@ -227,10 +227,10 @@ class Speller(nn.Module):
             current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
             cdn_out_t = self.cdn.forward(cdn_inputs)  # (batch, output_size)
-            y_t = self.random_decode(cdn_out_t)
             output_logits[:, t, :] = cdn_out_t
             if random.random() > teach_rate:
                 # Use the current model output as the next timestep input
+                y_t = self.random_decode(cdn_out_t)
                 prev_y = y_t
             else:
                 # Use the ground truth as the next timestep input
