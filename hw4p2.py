@@ -166,7 +166,7 @@ def train_las(params: dict):
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs):
-        train_epoch(val_loader, model, criterion, optimizer, scaler, epoch)
+        train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
 
 
 if __name__ == "__main__":
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
-    parser.add_argument("--validation_batch_size", type=int, default=1024)
+    parser.add_argument("--validation_batch_size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--char_embedding_size", type=int, default=256)
