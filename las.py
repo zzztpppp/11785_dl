@@ -301,14 +301,9 @@ class LAS(nn.Module):
         self.tf_rate = teacher_force_rate
 
     def teacher_forced_forward(self, seq_x, seq_lengths, seq_y):
-        start = time.time()
         seq_embeddings, seq_embedding_lengths = self.listener.forward(seq_x, seq_lengths)
-        end_1 = time.time()
-        print(f"listen forward elapsed time {end_1 - start}")
         output_logits = self.speller.teacher_forced_forward(
             seq_embeddings, seq_embedding_lengths , seq_y, teach_rate=self.tf_rate)
-        end_2 = time.time()
-        print(f"speller forward elapsed time {end_2 - end_1}")
         return output_logits
 
     def forward(self, seq_x, seq_lengths):

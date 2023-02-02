@@ -124,10 +124,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
             loss = criterion(packed_logits.data, packed_targets.data)
 
         total_training_loss += float(loss)
-        start = time.time()
         scaler.scale(loss).backward()
-        end_1 = time.time()
-        print(f"Backward time {end_1 - start}")
         scaler.step(optimizer)
         scaler.update()
         if scheduler is not None:
