@@ -187,7 +187,7 @@ def train_las(params: dict):
     scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
-        if epoch + 1 % 3 == 0:
+        if (epoch + 1) % 3 == 0:
             val_loss = validate(model, val_loader)
             print(f"Validation loss: {val_loss}")
 
