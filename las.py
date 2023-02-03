@@ -203,7 +203,7 @@ class Speller(nn.Module):
                 batch_size,
                 self.hidden_size,
                 device=seq_embeddings.device,
-                dtype=seq_embeddings.dtyype
+                dtype=seq_embeddings.dtype
             ),
             seq_embeddings,
             seq_embedding_lengths
