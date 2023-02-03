@@ -104,7 +104,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         model.to(device)
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            output_logits = model.forward(batch_x, batch_seq_lengths, batch_y)
+            output_logits, _ = model.forward(batch_x, batch_seq_lengths, batch_y)
 
             # We don't include <sos> when compute the loss
             batch_target_lengths = [l - 1 for l in batch_target_lengths]
