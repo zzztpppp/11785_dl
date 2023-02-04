@@ -1,9 +1,9 @@
 import random
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import  pack_padded_sequence, pad_packed_sequence
 from torch.nn.functional import softmax
-from phonetics import SOS_TOKEN, EOS_TOKEN
+from phonetics import SOS_TOKEN
 
 
 class ResidualBlock1D(torch.nn.Module):
@@ -132,8 +132,6 @@ class Attention(nn.Module):
         :return:
         """
         batch_size, max_length, hidden_size = embedding_seq.shape
-        print(embedding_seq.shape)
-        print(self._hidden_dim, self._key_dim)
         keys = self._key_mlp.forward(embedding_seq)  # (batch, max_length, key_dim)
         values = self._value_mlp.forward(embedding_seq)  # (batch, max_length, val_dim)
         weights = torch.zeros(batch_size, max_length, device=query.device, dtype=query.dtype)
@@ -144,7 +142,7 @@ class Attention(nn.Module):
             query_b = query[b][:, None]
             key_b = keys[b, :seq_length, :]
             weights_b = softmax(
-                torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size)),
+                torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size).to(embedding_seq.device)),
                 dim=0
             )  # (seq_length, 1)
             weights[b, :seq_length] = weights_b.squeeze()
@@ -194,71 +192,45 @@ class Speller(nn.Module):
         hx = self.decoder.forward(lstm_inputs, hx)
         return hx
 
-    def teacher_forced_forward(self, seq_embeddings, seq_embedding_lengths, batch_y, teach_rate=0.9):
-        """
-        Used during the training phase
-        :param teach_rate:
-        :param seq_embeddings:
-        :param seq_embedding_lengths
-        :param batch_y: True sequence
-        :return:
-        """
-        batch_size, max_length, _ = seq_embeddings.shape
-        prev_y = batch_y[:, 0]
-        prev_context, _ = self.attend_layer.forward(
-            torch.zeros(batch_size, self.hidden_size),
-            seq_embeddings,
-            seq_embedding_lengths
-        )
-        hx = None
-        output_logits = torch.zeros(
-            batch_size,
-            max_length,   # The output doesn't contain <sos>
-            self.output_size,
-            dtype=seq_embeddings.dtype,
-            device=seq_embeddings.device
-        )
-
-        for t in range(1, max_length):
-            hx = self.spell_step(prev_y, hx, prev_context)
-            current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
-            cdn_inputs = torch.concat([hx[0], current_context], dim=1)
-            cdn_out_t = self.cdn.forward(cdn_inputs)  # (batch, output_size)
-            y_t = self.random_decode(cdn_out_t)
-            output_logits[:, t, :] = cdn_out_t
-            if random.random() > teach_rate:
-                # Use the current model output as the next timestep input
-                prev_y = y_t
-            else:
-                # Use the ground truth as the next timestep input
-                prev_y = batch_y[:, t]
-
-        # Returning logits for loss computation
-        return output_logits
-
-    def forward(self, seq_embeddings, seq_embedding_lengths):
+    def forward(self, seq_embeddings, seq_embedding_lengths, batch_y=None, tf_rate=1.0):
         batch_size = seq_embeddings.shape[0]
-        max_decode_length = 600
+        max_decode_length = 600 if batch_y is None else batch_y.shape[1]
         prev_y = torch.zeros(batch_size, dtype=torch.long, device=seq_embeddings.device)
         prev_y[:] = SOS_TOKEN
         hx = None
         prev_context, _ = self.attend_layer.forward(
-            torch.zeros(batch_size, self.hidden_size, device=seq_embeddings.device, dtype=seq_embeddings.dtype),
+            torch.zeros(
+                batch_size,
+                self.hidden_size,
+                device=seq_embeddings.device,
+                dtype=seq_embeddings.dtype
+            ),
             seq_embeddings,
             seq_embedding_lengths
         )
         output_symbols = torch.zeros(batch_size, max_decode_length, dtype=torch.long, device=seq_embeddings.device)
-        for i in range(max_decode_length):
+        output_logits = torch.zeros(
+            batch_size,
+            max_decode_length,
+            self.output_size,
+            dtype=seq_embeddings.dtype,
+            device=seq_embeddings.device
+        )
+        for i in range(1, max_decode_length):
             hx = self.spell_step(prev_y, hx, prev_context)
             current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
             cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
+            output_logits[:, i, :] = cdn_out_i
             y_i = self.random_decode(cdn_out_i)
             output_symbols[:, i] = y_i
             prev_context = current_context
-            prev_y = y_i
+            if random.random() < tf_rate and batch_y is not None:
+                prev_y = batch_y[:, i]
+            else:
+                prev_y = y_i
 
-        return output_symbols
+        return output_logits, output_symbols
 
     @staticmethod
     def random_decode(cdn_out):
@@ -292,13 +264,7 @@ class LAS(nn.Module):
         )
         self.tf_rate = teacher_force_rate
 
-    def teacher_forced_forward(self, seq_x, seq_lengths, seq_y):
-        seq_embeddings, seq_embedding_lengths = self.listener.forward(seq_x, seq_lengths)
-        output_logits = self.speller.teacher_forced_forward(seq_embeddings, seq_embedding_lengths, seq_y,
-                                                            teach_rate=self.tf_rate)
-        return output_logits
-
-    def forward(self, seq_x, seq_lengths):
+    def forward(self, seq_x, seq_lengths, seq_y=None):
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
-        outputs = self.speller.forward(seq_embeddings, seq_embeddings_lengths)
-        return outputs
+        logits, symbols = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
+        return logits, symbols
