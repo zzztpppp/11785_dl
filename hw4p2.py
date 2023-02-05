@@ -61,7 +61,7 @@ class LabeledDataset(Dataset):
     @staticmethod
     def collate_fn(batch):
         batch_x = [torch.tensor(x) for (x, _), _ in batch]
-        batch_y = [torch.tensor(y) for (_, y), _ in batch]
+        batch_y = [torch.tensor(y, dtype=torch.long) for (_, y), _ in batch]
         batch_seq_lengths = [l for _, (l, _) in batch]
         batch_target_lengths = [t for _, (_, t) in batch]
 
@@ -121,7 +121,6 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
                 enforce_sorted=False
             )
 
-            # CTC loss requires (L B, C) so we transpose
             loss = criterion(packed_logits.data, packed_targets.data)
 
         total_training_loss += float(loss)
@@ -141,17 +140,20 @@ def validate(model: torch.nn.Module, dev_loader):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
+    total_samples = 0
     with torch.inference_mode():
         for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(dev_loader):
+            batch_size = batch_y.shape[0]
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
             logits, symbols = model.forward(batch_x, batch_seq_lengths)
             packed_logits = pack_padded_sequence(logits, batch_target_lengths, batch_first=True, enforce_sorted=False)
-            packed_y =  pack_padded_sequence(batch_y, batch_target_lengths, batch_first=True, enforce_sorted=False)
+            packed_y = pack_padded_sequence(batch_y, batch_target_lengths, batch_first=True, enforce_sorted=False)
             loss = cross_entropy(packed_logits.data, packed_y.data)
-            total_loss += loss
+            total_loss = total_loss + batch_size * float(loss)
+            total_samples += batch_size
 
-    return total_loss
+    return total_loss / total_samples
 
 
 def train_las(params: dict):
