@@ -136,7 +136,8 @@ class Attention(nn.Module):
             torch.arange(0, max_length, device=query.device)[None, :],
             (batch_size, 1)
         )[:, :, None] # (batch_size, max_length, 1). Expand to allow broadcasting on the last dim
-        boolean_mask = boolean_mask.lt(torch.tensor(batch_seq_lengths))
+        boolean_mask = boolean_mask.lt(torch.tensor(batch_seq_lengths).to(query.device)[:, None, None])
+        print(boolean_mask.shape)
         masked_embedding = embedding_seq * boolean_mask
 
         # For each query in the batch, compute
