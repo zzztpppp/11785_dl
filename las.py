@@ -148,6 +148,8 @@ class Attention(nn.Module):
             (keys *  query[:, None, :]).sum(dim=1) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
             dim=1
         )
+        print(weights.shape)
+        print(values.shape)
         context = (values * weights[:, :, None]).sum(dim=1)
         return context, weights
 
