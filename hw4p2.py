@@ -95,10 +95,12 @@ class UnlabeledDataset(Dataset):
 
 def train_epoch(training_loader, model, criterion, optimizer, scaler, current_epoch, scheduler=None):
     total_training_loss = 0.0
+    total_samples = 0
     total_batches = len(training_loader)
     model.train()
     b = 0
     for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(training_loader):
+        batch_size = batch_y.shape[0]
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
         model.to(device)
@@ -123,7 +125,8 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
 
             loss = criterion(packed_logits.data, packed_targets.data)
 
-        total_training_loss += float(loss)
+        total_training_loss += (float(loss) * batch_size)
+        total_samples += batch_size
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -132,8 +135,8 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
             scheduler.step(current_epoch)
         b += 1
 
-    training_loss_sum = "Training loss ", total_training_loss / len(training_loader)
-    print(training_loss_sum)
+    training_loss = "Training loss ", total_training_loss / total_samples
+    print(training_loss)
 
 
 def validate(model: torch.nn.Module, dev_loader):
