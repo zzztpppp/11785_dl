@@ -209,29 +209,33 @@ class Speller(nn.Module):
             seq_embeddings,
             seq_embedding_lengths
         )
-        output_symbols = torch.zeros(batch_size, max_decode_length, dtype=torch.long, device=seq_embeddings.device)
-        output_logits = torch.zeros(
-            batch_size,
-            max_decode_length,
-            self.output_size,
-            dtype=seq_embeddings.dtype,
-            device=seq_embeddings.device
-        )
+        # output_symbols = torch.zeros(batch_size, max_decode_length, dtype=torch.long, device=seq_embeddings.device)
+        # output_logits = torch.zeros(
+        #     batch_size,
+        #     max_decode_length,
+        #     self.output_size,
+        #     dtype=seq_embeddings.dtype,
+        #     device=seq_embeddings.device
+        # )
+        output_logits_seq = []
+        output_symbols_seq = []
         for i in range(1, max_decode_length):
             hx = self.spell_step(prev_y, hx, prev_context)
             current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
             cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
-            output_logits[:, i, :] = cdn_out_i
+            # output_logits[:, i, :] = cdn_out_i
+            output_logits_seq.append(cdn_out_i)
             y_i = self.random_decode(cdn_out_i)
-            output_symbols[:, i] = y_i
+            # output_symbols[:, i] = y_i
+            output_symbols_seq.append(y_i)
             prev_context = current_context
             if random.random() < tf_rate and batch_y is not None:
                 prev_y = batch_y[:, i]
             else:
                 prev_y = y_i
 
-        return output_logits, output_symbols
+        return torch.stack(output_logits_seq, dim=1), torch.stack(output_symbols_seq, dim=0)
 
     @staticmethod
     def random_decode(cdn_out):
