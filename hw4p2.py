@@ -1,5 +1,3 @@
-import time
-
 import numpy as np
 import torch
 import argparse
@@ -111,7 +109,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
             # We don't include <sos> when compute the loss
             batch_target_lengths = [l - 1 for l in batch_target_lengths]
             packed_logits = pack_padded_sequence(
-                output_logits[:, 1:, :],
+                output_logits,
                 torch.tensor(batch_target_lengths) - 1,
                 batch_first=True,
                 enforce_sorted=False
@@ -149,13 +147,13 @@ def validate(model: torch.nn.Module, dev_loader):
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
             logits, symbols = model.forward(batch_x, batch_seq_lengths)
-            # Exclude <eos> token
             batch_target_lengths = [l - 1 for l in batch_target_lengths]
-            packed_logits = pack_padded_sequence(logits[:, 1:, :],
+            packed_logits = pack_padded_sequence(logits,
                                                  batch_target_lengths,
                                                  batch_first=True,
                                                  enforce_sorted=False
                                                  )
+            # Exclude <sos> token
             packed_y = pack_padded_sequence(
                 batch_y[:, 1:],
                 batch_target_lengths,
@@ -203,9 +201,8 @@ def train_las(params: dict):
     scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
-        if (epoch + 1) % 3 == 0:
-            val_loss = validate(model, val_loader)
-            print(f"Validation loss: {val_loss}")
+        val_loss = validate(model, val_loader)
+        print(f"Validation loss: {val_loss}")
 
 
 if __name__ == "__main__":

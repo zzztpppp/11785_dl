@@ -63,25 +63,13 @@ class PyramidLSTM(nn.Module):
     @staticmethod
     def reduce_length(batch_x: torch.tensor, seq_lengths: list) -> (torch.tensor, list):
         batch_size, max_length, hidden_size = batch_x.shape
-        batch_resized = torch.zeros(
-            batch_size,
-            max_length // 2,
-            hidden_size * 2,
-            dtype=batch_x.dtype,
-            layout=batch_x.layout,
-            device=batch_x.device
-        )
+        # With num of time steps reduced by a number of 2
+        # and hidden sizes increased by a number of 2.
+        max_length = max_length - (max_length % 2)
+        reduced_batch_x = batch_x[:, : max_length, :].contiguous().reshape(batch_size, max_length // 2, hidden_size * 2)
+        reduced_seq_lengths = [l // 2 for l in seq_lengths]
 
-        resized_lengths = []
-        for i, length in enumerate(seq_lengths):
-            # Drop last step if length is odd
-            length = length - (length % 2)
-            resized_length = length // 2
-            resized = batch_x[i, :length, :].reshape((resized_length, hidden_size * 2))   # (L // 2, H * 2)
-            batch_resized[i, :resized_length, :] = resized
-            resized_lengths.append(resized_length)
-
-        return batch_resized, resized_lengths
+        return reduced_batch_x, reduced_seq_lengths
 
 
 class PyLSTMEncoder(nn.Module):
@@ -144,7 +132,7 @@ class Attention(nn.Module):
         keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
         values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
         weights = softmax(
-            (keys *  query[:, None, :]).sum(dim=2) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
+            (keys * query[:, None, :]).sum(dim=2) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
             dim=1
         )
         context = (values * weights[:, :, None]).sum(dim=1)
