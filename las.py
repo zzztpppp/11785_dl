@@ -132,20 +132,21 @@ class Attention(nn.Module):
         :return:
         """
         batch_size, max_length, hidden_size = embedding_seq.shape
-        keys = self._key_mlp.forward(embedding_seq)  # (batch, max_length, key_dim)
-        values = self._value_mlp.forward(embedding_seq)  # (batch, max_length, val_dim)
-        weights = torch.zeros(batch_size, max_length, device=query.device, dtype=query.dtype)
+        boolean_mask = torch.tile(
+            torch.arange(0, max_length, device=query.device)[None, :],
+            (batch_size, 1)
+        )[:, :, None] # (batch_size, max_length, 1). Expand to allow broadcasting on the last dim
+        boolean_mask = boolean_mask.lt(torch.tensor(batch_seq_lengths))
+        masked_embedding = embedding_seq * boolean_mask
+
         # For each query in the batch, compute
         # its context.
-        for b in range(batch_size):
-            seq_length = batch_seq_lengths[b]
-            query_b = query[b][:, None]
-            key_b = keys[b, :seq_length, :]
-            weights_b = softmax(
-                torch.matmul(key_b, query_b) / torch.sqrt(torch.tensor(hidden_size).to(embedding_seq.device)),
-                dim=0
-            )  # (seq_length, 1)
-            weights[b, :seq_length] = weights_b.squeeze()
+        keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
+        values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
+        weights = softmax(
+            (keys *  query[:, None, :]).sum(dim=1) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
+            dim=1
+        )
         context = (values * weights[:, :, None]).sum(dim=1)
         return context, weights
 
