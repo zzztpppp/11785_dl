@@ -106,23 +106,22 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         model.to(device)
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            output_logits, _ = model.forward(batch_x, batch_seq_lengths, batch_y)
+            output_logits, output_symbols = model.forward(batch_x, batch_seq_lengths, batch_y)
 
             # We don't include <sos> when compute the loss
             batch_target_lengths = [l - 1 for l in batch_target_lengths]
             packed_logits = pack_padded_sequence(
                 output_logits[:, 1:, :],
-                batch_target_lengths,
+                torch.tensor(batch_target_lengths) - 1,
                 batch_first=True,
                 enforce_sorted=False
             )
             packed_targets = pack_padded_sequence(
                 batch_y[:, 1:],
-                batch_target_lengths,
+                torch.tensor(batch_target_lengths) - 1,
                 batch_first=True,
                 enforce_sorted=False
             )
-
             loss = criterion(packed_logits.data, packed_targets.data)
 
         total_training_loss += (float(loss) * batch_size)
@@ -150,8 +149,20 @@ def validate(model: torch.nn.Module, dev_loader):
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
             logits, symbols = model.forward(batch_x, batch_seq_lengths)
-            packed_logits = pack_padded_sequence(logits, batch_target_lengths, batch_first=True, enforce_sorted=False)
-            packed_y = pack_padded_sequence(batch_y, batch_target_lengths, batch_first=True, enforce_sorted=False)
+            # Exclude <eos> token
+            batch_target_lengths = [l - 1 for l in batch_target_lengths]
+            packed_logits = pack_padded_sequence(logits[:, 1:, :],
+                                                 batch_target_lengths,
+                                                 batch_first=True,
+                                                 enforce_sorted=False
+                                                 )
+            packed_y = pack_padded_sequence(
+                batch_y[:, 1:],
+                batch_target_lengths,
+                batch_first=True,
+                enforce_sorted=False
+            )
+
             loss = cross_entropy(packed_logits.data, packed_y.data)
             total_loss = total_loss + batch_size * float(loss)
             total_samples += batch_size
