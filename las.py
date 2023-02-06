@@ -137,7 +137,6 @@ class Attention(nn.Module):
             (batch_size, 1)
         )[:, :, None] # (batch_size, max_length, 1). Expand to allow broadcasting on the last dim
         boolean_mask = boolean_mask.lt(torch.tensor(batch_seq_lengths).to(query.device)[:, None, None])
-        print(boolean_mask.shape)
         masked_embedding = embedding_seq * boolean_mask
 
         # For each query in the batch, compute
@@ -145,11 +144,9 @@ class Attention(nn.Module):
         keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
         values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
         weights = softmax(
-            (keys *  query[:, None, :]).sum(dim=1) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
+            (keys *  query[:, None, :]).sum(dim=2) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
             dim=1
         )
-        print(weights.shape)
-        print(values.shape)
         context = (values * weights[:, :, None]).sum(dim=1)
         return context, weights
 
