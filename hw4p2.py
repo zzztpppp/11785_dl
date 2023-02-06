@@ -120,7 +120,6 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
                 batch_first=True,
                 enforce_sorted=False
             )
-            print(output_symbols)
             loss = criterion(packed_logits.data, packed_targets.data)
 
         total_training_loss += float(loss)
