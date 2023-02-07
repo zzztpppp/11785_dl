@@ -174,7 +174,8 @@ def train_las(params: dict):
         params['seq_embedding_size'],
         len(VOCAB),
         params['plstm_layers'],
-        params['tf_rate']
+        params['tf_rate'],
+        params["encoder_dropout"]
     )
 
     n_epochs = params["n_epochs"]
@@ -218,6 +219,7 @@ if __name__ == "__main__":
     parser.add_argument("--char_embedding_size", type=int, default=256)
     parser.add_argument("--seq_embedding_size", type=int, default=32)
     parser.add_argument("--plstm_layers", type=int, default=3)
+    parser.add_argument("--encoder_dropout", type=int, default=0.5)
     parser.add_argument("--tf_rate", type=float, default=1.0)
     args = parser.parse_args()
     train_las(vars(args))
