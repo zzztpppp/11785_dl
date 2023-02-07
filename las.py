@@ -173,6 +173,8 @@ class Speller(nn.Module):
         self.char_embedding = nn.Embedding(output_size, char_embedding_size)
         self.decoder = nn.LSTMCell(hidden_size + seq_embedding_size, hidden_size)
         self.cdn = nn.Linear(hidden_size + seq_embedding_size, output_size)
+        # Weight tying
+        self.cdn.weight = self.char_embedding.weight
 
     def spell_step(self, batch_prev_y, hx, prev_context):
         # TODO: use 2 LSTMCell as per the paper
@@ -197,14 +199,6 @@ class Speller(nn.Module):
             seq_embeddings,
             seq_embedding_lengths
         )
-        # output_symbols = torch.zeros(batch_size, max_decode_length, dtype=torch.long, device=seq_embeddings.device)
-        # output_logits = torch.zeros(
-        #     batch_size,
-        #     max_decode_length,
-        #     self.output_size,
-        #     dtype=seq_embeddings.dtype,
-        #     device=seq_embeddings.device
-        # )
         output_logits_seq = []
         output_symbols_seq = []
         for i in range(1, max_decode_length):
@@ -212,10 +206,8 @@ class Speller(nn.Module):
             current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
             cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
-            # output_logits[:, i, :] = cdn_out_i
             output_logits_seq.append(cdn_out_i)
             y_i = self.random_decode(cdn_out_i)
-            # output_symbols[:, i] = y_i
             output_symbols_seq.append(y_i)
             prev_context = current_context
             if random.random() < tf_rate and batch_y is not None:
