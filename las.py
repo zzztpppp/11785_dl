@@ -38,12 +38,28 @@ class ResidualBlock1D(torch.nn.Module):
         return torch.nn.functional.relu(out + residual)
 
 
+class LockedDropout(nn.Module):
+    def __init__(self, p):
+        super().__init__()
+        self._p = p
+
+    def forward(self, batch_x):
+        if not self.train():
+            return batch_x
+
+        batch_size, max_length, hidden_size = batch_x.shape
+        mask = batch_x.new_empty(batch_size, 1, hidden_size, requires_grad=False).bernoulli(1 - self._p)
+        batch_x = mask * batch_x
+        batch_x = batch_x / (1 - self._p)
+        return batch_x
+
+
 class PyramidLSTM(nn.Module):
     """
     The pyramid-lstm block reduce input's time-step by half and feed into a
     bidirectional lstm layer
     """
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, dropout):
         super().__init__()
         self.layer = nn.LSTM(
             input_size=input_size,
@@ -51,6 +67,9 @@ class PyramidLSTM(nn.Module):
             bidirectional=True,
             batch_first=True
         )
+        self.dropout_layer = None
+        if dropout > 0:
+           self.dropout_layer = LockedDropout(dropout)
 
     def forward(self, batch_x, seq_lengths):
         # Reduce the sequence length by 2
@@ -58,6 +77,8 @@ class PyramidLSTM(nn.Module):
         packed_data = pack_padded_sequence(batch_x_resized, seq_lengths_resized, batch_first=True, enforce_sorted=False)
         packed_out, _ = self.layer.forward(packed_data)
         padded_out, _ = pad_packed_sequence(packed_out, batch_first=True)
+        if self.dropout_layer is not None:
+            self.dropout_layer.forward(padded_out)
         return padded_out, seq_lengths_resized
 
     @staticmethod
@@ -73,7 +94,7 @@ class PyramidLSTM(nn.Module):
 
 
 class PyLSTMEncoder(nn.Module):
-    def __init__(self, input_size, hidden_size, layers):
+    def __init__(self, input_size, hidden_size, layers, dropout):
         """
         The final output size is (hidden_size * (2 ** layers ))
         :param input_size:
@@ -88,9 +109,12 @@ class PyLSTMEncoder(nn.Module):
         for i in range(layers):
             p_hidden_size = hidden_size * (2 ** (i + 1))
             self.p_lstms.append(
-                PyramidLSTM(
-                    input_size=p_hidden_size,
-                    hidden_size=p_hidden_size // 2,
+                nn.Sequential(
+                    PyramidLSTM(
+                        input_size=p_hidden_size,
+                        hidden_size=p_hidden_size // 2,
+                        dropout=dropout
+                    ),
                 )
             )
 
@@ -144,7 +168,7 @@ class Listener(nn.Module):
     Listener consists of 1D cnn and some specified layers of lstms
     """
 
-    def __init__(self, input_size, initial_hidden_size, reduce_factor):
+    def __init__(self, input_size, initial_hidden_size, reduce_factor, dropout):
         super().__init__()
         # The first layer doesn't reduce the number of times steps/
         # The rest each reduces the number of time steps by a factor
@@ -152,7 +176,7 @@ class Listener(nn.Module):
             ResidualBlock1D(input_size, initial_hidden_size, kernel_size=3),
             ResidualBlock1D(initial_hidden_size, initial_hidden_size, kernel_size=3)
         )
-        self.pyramid_encoder = PyLSTMEncoder(initial_hidden_size, initial_hidden_size, reduce_factor)
+        self.pyramid_encoder = PyLSTMEncoder(initial_hidden_size, initial_hidden_size, reduce_factor, dropout)
 
     def forward(self, x, seq_lenghts):
         embeded_seq, embeded_seq_length = self.pyramid_encoder.forward(
@@ -232,7 +256,15 @@ class Speller(nn.Module):
 
 
 class LAS(nn.Module):
-    def __init__(self, char_embedding_size, seq_embedding_size, output_size, plstm_layers, teacher_force_rate):
+    def __init__(
+            self,
+            char_embedding_size,
+            seq_embedding_size,
+            output_size,
+            plstm_layers,
+            teacher_force_rate,
+            encoder_dropout
+    ):
         """
         A composite model that consists of a listner and a speller.
 
@@ -245,9 +277,10 @@ class LAS(nn.Module):
         :param output_size: Size of the vocabulary bag.
         :param plstm_layers: Number of pyramid lstm layers.
         :param teacher_force_rate: Initial teacher force rate during training.
+        :param encoder_dropout: dropout rate for the encoder
         """
         super().__init__()
-        self.listener = Listener(15, seq_embedding_size, plstm_layers)
+        self.listener = Listener(15, seq_embedding_size, plstm_layers, encoder_dropout)
         self.speller = Speller(
             seq_embedding_size * (2 ** plstm_layers),
             char_embedding_size,
