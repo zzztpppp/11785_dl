@@ -173,8 +173,15 @@ class Speller(nn.Module):
         self.char_embedding = nn.Embedding(output_size, char_embedding_size)
         self.decoder = nn.LSTMCell(hidden_size + seq_embedding_size, hidden_size)
         self.cdn = nn.Linear(hidden_size + seq_embedding_size, output_size)
+
         # Weight tying
-        self.cdn.weight = self.char_embedding.weight
+        cdn1 = nn.Linear(hidden_size + seq_embedding_size, char_embedding_size)
+        cdn2 = nn.Linear(char_embedding_size, output_size)
+        self.cdn = nn.Sequential(
+            cdn1,
+            nn.ReLU(),
+            cdn2
+        )
 
     def spell_step(self, batch_prev_y, hx, prev_context):
         # TODO: use 2 LSTMCell as per the paper
