@@ -69,7 +69,7 @@ class PyramidLSTM(nn.Module):
         )
         self.dropout_layer = None
         if dropout > 0:
-           self.dropout_layer = LockedDropout(dropout)
+            self.dropout_layer = LockedDropout(dropout)
 
     def forward(self, batch_x, seq_lengths):
         # Reduce the sequence length by 2
@@ -109,12 +109,10 @@ class PyLSTMEncoder(nn.Module):
         for i in range(layers):
             p_hidden_size = hidden_size * (2 ** (i + 1))
             self.p_lstms.append(
-                nn.Sequential(
-                    PyramidLSTM(
-                        input_size=p_hidden_size,
-                        hidden_size=p_hidden_size // 2,
-                        dropout=dropout
-                    ),
+                PyramidLSTM(
+                    input_size=p_hidden_size,
+                    hidden_size=p_hidden_size // 2,
+                    dropout=dropout
                 )
             )
 
