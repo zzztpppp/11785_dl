@@ -121,13 +121,13 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
             batch_target_lengths = [l - 1 for l in batch_target_lengths]
             packed_logits = pack_padded_sequence(
                 output_logits,
-                torch.tensor(batch_target_lengths) - 1,
+                torch.tensor(batch_target_lengths),
                 batch_first=True,
                 enforce_sorted=False
             )
             packed_targets = pack_padded_sequence(
                 batch_y[:, 1:],
-                torch.tensor(batch_target_lengths) - 1,
+                torch.tensor(batch_target_lengths),
                 batch_first=True,
                 enforce_sorted=False
             )
@@ -211,11 +211,11 @@ def train_las(params: dict):
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
-    tf_scheduler = StepTeacherForcingScheduler(model)
+    # tf_scheduler = StepTeacherForcingScheduler(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss = validate(model, val_loader)
-        tf_scheduler.step()
+        # tf_scheduler.step()
         print(f"Validation loss: {val_loss}")
 
 
