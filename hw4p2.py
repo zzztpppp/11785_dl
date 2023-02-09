@@ -20,6 +20,17 @@ test_x_dir = os.path.join("test-clean", "mfcc")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+class StepTeacherForcingScheduler:
+    def __init__(self, model, step_size=0.05, min=0.5):
+        self._step_size = step_size
+        self._min = min
+        self._model = model
+
+    def step(self):
+        current_rf_rate = self._model.tf_rate
+        self._model.tf_rate = max(self._min, current_rf_rate - self._step_size)
+
+
 def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
     x_dir = os.path.join(data_root, x_dir)
     y_dir = os.path.join(data_root, y_dir)
@@ -200,9 +211,11 @@ def train_las(params: dict):
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
+    tf_scheduler = StepTeacherForcingScheduler(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss = validate(model, val_loader)
+        tf_scheduler.step()
         print(f"Validation loss: {val_loss}")
 
 
