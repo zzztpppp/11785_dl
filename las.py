@@ -78,7 +78,7 @@ class PyramidLSTM(nn.Module):
         packed_out, _ = self.layer.forward(packed_data)
         padded_out, _ = pad_packed_sequence(packed_out, batch_first=True)
         if self.dropout_layer is not None:
-            self.dropout_layer.forward(padded_out)
+            padded_out = self.dropout_layer.forward(padded_out)
         return padded_out, seq_lengths_resized
 
     @staticmethod
