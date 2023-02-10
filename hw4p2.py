@@ -211,11 +211,11 @@ def train_las(params: dict):
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
-    # tf_scheduler = StepTeacherForcingScheduler(model)
+    tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"])
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss = validate(model, val_loader)
-        # tf_scheduler.step()
+        tf_scheduler.step()
         print(f"Validation loss: {val_loss}")
 
 
@@ -234,6 +234,7 @@ if __name__ == "__main__":
     parser.add_argument("--plstm_layers", type=int, default=3)
     parser.add_argument("--encoder_dropout", type=int, default=0.5)
     parser.add_argument("--tf_rate", type=float, default=1.0)
+    parser.add_argument("--tf_step_size", type=float, default=0.025)
     args = parser.parse_args()
     train_las(vars(args))
     print("done")
