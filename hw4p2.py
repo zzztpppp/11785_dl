@@ -10,7 +10,7 @@ from phonetics import VOCAB
 from las import LAS
 
 training_x_dir = os.path.join("train-clean-100", "mfcc")
-training_y_dir = os.path.join("train-clean-100",  "transcript", "raw")
+training_y_dir = os.path.join("train-clean-100", "transcript", "raw")
 
 dev_x_dir = os.path.join("dev-clean", "mfcc")
 dev_y_dir = os.path.join("dev-clean", "transcript", "raw")
@@ -21,14 +21,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class StepTeacherForcingScheduler:
-    def __init__(self, model, step_size=0.05, min=0.5):
+    def __init__(self, model, step_size=0.05, min=0.5, patience=2):
         self._step_size = step_size
         self._min = min
         self._model = model
+        self._patience = patience
+        self._current_step = 0
 
     def step(self):
-        current_rf_rate = self._model.tf_rate
-        self._model.tf_rate = max(self._min, current_rf_rate - self._step_size)
+        if self._current_step > 0 and self._current_step % self._patience == 0:
+            current_rf_rate = self._model.tf_rate
+            self._model.tf_rate = max(self._min, current_rf_rate - self._step_size)
 
 
 def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
@@ -110,29 +113,9 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
     b = 0
     for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(training_loader):
         batch_size = batch_y.shape[0]
-        batch_x = batch_x.to(device)
-        batch_y = batch_y.to(device)
         model.to(device)
         optimizer.zero_grad()
-        with torch.cuda.amp.autocast():
-            output_logits, output_symbols = model.forward(batch_x, batch_seq_lengths, batch_y)
-
-            # We don't include <sos> when compute the loss
-            batch_target_lengths = [l - 1 for l in batch_target_lengths]
-            packed_logits = pack_padded_sequence(
-                output_logits,
-                torch.tensor(batch_target_lengths),
-                batch_first=True,
-                enforce_sorted=False
-            )
-            packed_targets = pack_padded_sequence(
-                batch_y[:, 1:],
-                torch.tensor(batch_target_lengths),
-                batch_first=True,
-                enforce_sorted=False
-            )
-            loss = criterion(packed_logits.data, packed_targets.data)
-
+        loss = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths)
         total_training_loss += (float(loss) * batch_size)
         total_samples += batch_size
         scaler.scale(loss).backward()
@@ -147,32 +130,45 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
     print(training_loss)
 
 
+def labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths, validation_mode=False):
+
+    with torch.cuda.amp.autocast():
+        batch_x = batch_x.to(device)
+        batch_y = batch_y.to(device)
+
+        if validation_mode:
+            output_logits, output_symbols = model.forward(batch_x, batch_seq_lengths)
+        else:
+            output_logits, output_symbols = model.forward(batch_x, batch_seq_lengths, batch_y)
+
+        # We don't include <sos> when compute the loss
+        batch_target_lengths = [l - 1 for l in batch_target_lengths]
+        packed_logits = pack_padded_sequence(
+            output_logits,
+            torch.tensor(batch_target_lengths),
+            batch_first=True,
+            enforce_sorted=False
+        )
+        packed_targets = pack_padded_sequence(
+            batch_y[:, 1:],
+            torch.tensor(batch_target_lengths),
+            batch_first=True,
+            enforce_sorted=False
+        )
+        loss = criterion(packed_logits.data, packed_targets.data)
+    return loss
+
+
 def validate(model: torch.nn.Module, dev_loader):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
     total_samples = 0
+    criterion = torch.nn.CrossEntropyLoss()
     with torch.inference_mode():
         for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(dev_loader):
             batch_size = batch_y.shape[0]
-            batch_x = batch_x.to(device)
-            batch_y = batch_y.to(device)
-            logits, symbols = model.forward(batch_x, batch_seq_lengths)
-            batch_target_lengths = [l - 1 for l in batch_target_lengths]
-            packed_logits = pack_padded_sequence(logits,
-                                                 batch_target_lengths,
-                                                 batch_first=True,
-                                                 enforce_sorted=False
-                                                 )
-            # Exclude <sos> token
-            packed_y = pack_padded_sequence(
-                batch_y[:, 1:],
-                batch_target_lengths,
-                batch_first=True,
-                enforce_sorted=False
-            )
-
-            loss = cross_entropy(packed_logits.data, packed_y.data)
+            loss = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths, True)
             total_loss = total_loss + batch_size * float(loss)
             total_samples += batch_size
 
