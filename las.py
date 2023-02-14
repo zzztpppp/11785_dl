@@ -115,11 +115,16 @@ class PyLSTMEncoder(nn.Module):
                     dropout=dropout
                 )
             )
+        self.locked_dropout = None
+        if dropout > 0:
+            self.locked_dropout = LockedDropout(dropout)
 
     def forward(self, batch_x, seq_lengths):
         packed_x = pack_padded_sequence(batch_x, seq_lengths, batch_first=True, enforce_sorted=False)
         packed_b_out, _ = self.b_lstm.forward(packed_x)
         padded_b_out, _ = pad_packed_sequence(packed_b_out, batch_first=True)
+        if self.locked_dropout is not None:
+            padded_b_out = self.locked_dropout.forward(padded_b_out)
         p_input, p_size = padded_b_out, seq_lengths
         for p_lstm in self.p_lstms:
             p_input, p_size = p_lstm.forward(p_input, p_size)
@@ -184,7 +189,7 @@ class Listener(nn.Module):
 
 
 class Speller(nn.Module):
-    def __init__(self, seq_embedding_size, char_embedding_size, hidden_size, output_size):
+    def __init__(self, seq_embedding_size, char_embedding_size, hidden_size, output_size, dropout):
         super().__init__()
 
         self.hidden_size = hidden_size
