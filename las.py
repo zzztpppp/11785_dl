@@ -189,7 +189,7 @@ class Listener(nn.Module):
 
 
 class Speller(nn.Module):
-    def __init__(self, seq_embedding_size, char_embedding_size, hidden_size, output_size, dropout):
+    def __init__(self, seq_embedding_size, char_embedding_size, hidden_size, output_size):
         super().__init__()
 
         self.hidden_size = hidden_size
