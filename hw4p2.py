@@ -186,7 +186,8 @@ def train_las(params: dict):
         params["frequency_mask"],
         params["time_mask"]
     )
-
+    print(params)
+    print(model)
     n_epochs = params["n_epochs"]
     data_root = params["data_root"]
     num_workers = params["num_dataloader_workers"]
