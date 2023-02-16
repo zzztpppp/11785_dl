@@ -158,9 +158,6 @@ class Attention(nn.Module):
         # its context.
         keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
         values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
-        print(keys.shape)
-        print(values.shape)
-        print(query.shape)
         weights = softmax(
             (keys * query[:, None, :]).sum(dim=2) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
             dim=1
