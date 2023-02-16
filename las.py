@@ -201,7 +201,7 @@ class Speller(nn.Module):
         self.seq_embedding_size = seq_embedding_size
         self.attend_layer = Attention(seq_embedding_size, char_embedding_size // 2)
         self.char_embedding = nn.Embedding(output_size, char_embedding_size)
-        self.decoder = nn.LSTMCell(char_embedding_size + seq_embedding_size, char_embedding_size // 2)
+        self.decoder = nn.LSTMCell(char_embedding_size * 3, char_embedding_size // 2)
         self.cdn = nn.Linear(char_embedding_size, output_size)
 
         # Weight tying
