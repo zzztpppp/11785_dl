@@ -2,6 +2,7 @@ import random
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import  pack_padded_sequence, pad_packed_sequence
+from torchaudio.transforms import FrequencyMasking, TimeMasking
 from torch.nn.functional import softmax
 from phonetics import SOS_TOKEN
 
@@ -259,7 +260,9 @@ class LAS(nn.Module):
             output_size,
             plstm_layers,
             teacher_force_rate,
-            encoder_dropout
+            encoder_dropout,
+            freq_mask,
+            time_mask
     ):
         """
         A composite model that consists of a listner and a speller.
@@ -282,9 +285,16 @@ class LAS(nn.Module):
             char_embedding_size,
             output_size
         )
+        self.mask = nn.Sequential()
+        if freq_mask > 0:
+            self.mask.append(FrequencyMasking(freq_mask))
+        if time_mask > 0:
+            self.mask.append(TimeMasking(time_mask))
         self.tf_rate = teacher_force_rate
 
     def forward(self, seq_x, seq_lengths, seq_y=None):
+        if self.training:
+            seq_x = self.mask.forwrd(seq_x.tranpose(1, 2)).transpose(1, 2)
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
         logits, symbols = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
         return logits, symbols
