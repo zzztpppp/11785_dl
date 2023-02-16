@@ -294,7 +294,7 @@ class LAS(nn.Module):
 
     def forward(self, seq_x, seq_lengths, seq_y=None):
         if self.training:
-            seq_x = self.mask.forward(seq_x.tranpose(1, 2)).transpose(1, 2)
+            seq_x = self.mask.forward(seq_x.transpose(1, 2)).transpose(1, 2)
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
         logits, symbols = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
         return logits, symbols
