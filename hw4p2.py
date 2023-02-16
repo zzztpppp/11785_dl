@@ -230,6 +230,8 @@ if __name__ == "__main__":
     parser.add_argument("--plstm_layers", type=int, default=3)
     parser.add_argument("--encoder_dropout", type=float, default=0.5)
     parser.add_argument("--decoder_dropout", type=float, default=0.5)
+    parser.add_argument("--time_mask", type=int, default=30)
+    parser.add_argument("--frequency_mask", type=int, default=3)
     parser.add_argument("--tf_rate", type=float, default=1.0)
     parser.add_argument("--tf_step_size", type=float, default=0.025)
     args = parser.parse_args()

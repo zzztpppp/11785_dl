@@ -189,26 +189,20 @@ class Listener(nn.Module):
 
 
 class Speller(nn.Module):
-    def __init__(self, seq_embedding_size, char_embedding_size, hidden_size, output_size):
+    def __init__(self, seq_embedding_size, char_embedding_size, output_size):
         super().__init__()
 
-        self.hidden_size = hidden_size
+        self.hidden_size = char_embedding_size
         self.output_size = output_size
         self.char_embedding_size = char_embedding_size
         self.seq_embedding_size = seq_embedding_size
-        self.attend_layer = Attention(hidden_size, hidden_size)
+        self.attend_layer = Attention(char_embedding_size, char_embedding_size)
         self.char_embedding = nn.Embedding(output_size, char_embedding_size)
-        self.decoder = nn.LSTMCell(hidden_size + seq_embedding_size, hidden_size)
-        self.cdn = nn.Linear(hidden_size + seq_embedding_size, output_size)
+        self.decoder = nn.LSTMCell(char_embedding_size + seq_embedding_size, char_embedding_size)
+        self.cdn = nn.Linear(char_embedding_size, output_size)
 
         # Weight tying
-        cdn1 = nn.Linear(hidden_size + seq_embedding_size, char_embedding_size)
-        cdn2 = nn.Linear(char_embedding_size, output_size)
-        self.cdn = nn.Sequential(
-            cdn1,
-            nn.ReLU(),
-            cdn2
-        )
+        self.cdn.weight = self.char_embedding.weight
 
     def spell_step(self, batch_prev_y, hx, prev_context):
         # TODO: use 2 LSTMCell as per the paper
@@ -286,7 +280,6 @@ class LAS(nn.Module):
         self.listener = Listener(15, seq_embedding_size, plstm_layers, encoder_dropout)
         self.speller = Speller(
             seq_embedding_size * (2 ** plstm_layers),
-            char_embedding_size,
             char_embedding_size,
             output_size
         )
