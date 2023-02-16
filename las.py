@@ -158,6 +158,9 @@ class Attention(nn.Module):
         # its context.
         keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
         values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
+        print(keys.shape)
+        print(values.shape)
+        print(query.shape)
         weights = softmax(
             (keys * query[:, None, :]).sum(dim=2) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
             dim=1
@@ -192,7 +195,7 @@ class Speller(nn.Module):
     def __init__(self, seq_embedding_size, char_embedding_size, output_size):
         super().__init__()
 
-        self.hidden_size = char_embedding_size
+        self.hidden_size = char_embedding_size // 2
         self.output_size = output_size
         self.char_embedding_size = char_embedding_size
         self.seq_embedding_size = seq_embedding_size
