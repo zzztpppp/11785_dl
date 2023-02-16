@@ -67,9 +67,9 @@ class PyramidLSTM(nn.Module):
             bidirectional=True,
             batch_first=True
         )
-        self.dropout_layer = None
+        self.dropout_layer = nn.Sequential()
         if dropout > 0:
-            self.dropout_layer = LockedDropout(dropout)
+            self.dropout_layer.append(LockedDropout(dropout))
 
     def forward(self, batch_x, seq_lengths):
         # Reduce the sequence length by 2
@@ -77,8 +77,7 @@ class PyramidLSTM(nn.Module):
         packed_data = pack_padded_sequence(batch_x_resized, seq_lengths_resized, batch_first=True, enforce_sorted=False)
         packed_out, _ = self.layer.forward(packed_data)
         padded_out, _ = pad_packed_sequence(packed_out, batch_first=True)
-        if self.dropout_layer is not None:
-            padded_out = self.dropout_layer.forward(padded_out)
+        padded_out = self.dropout_layer.forward(padded_out)
         return padded_out, seq_lengths_resized
 
     @staticmethod
@@ -115,16 +114,15 @@ class PyLSTMEncoder(nn.Module):
                     dropout=dropout
                 )
             )
-        self.locked_dropout = None
+        self.locked_dropout = nn.Sequential()
         if dropout > 0:
-            self.locked_dropout = LockedDropout(dropout)
+            self.locked_dropout.append(LockedDropout(dropout))
 
     def forward(self, batch_x, seq_lengths):
         packed_x = pack_padded_sequence(batch_x, seq_lengths, batch_first=True, enforce_sorted=False)
         packed_b_out, _ = self.b_lstm.forward(packed_x)
         padded_b_out, _ = pad_packed_sequence(packed_b_out, batch_first=True)
-        if self.locked_dropout is not None:
-            padded_b_out = self.locked_dropout.forward(padded_b_out)
+        padded_b_out = self.locked_dropout.forward(padded_b_out)
         p_input, p_size = padded_b_out, seq_lengths
         for p_lstm in self.p_lstms:
             p_input, p_size = p_lstm.forward(p_input, p_size)
