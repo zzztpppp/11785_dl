@@ -44,7 +44,7 @@ class LockedDropout(nn.Module):
         self._p = p
 
     def forward(self, batch_x):
-        if not self.train():
+        if not self.training:
             return batch_x
 
         batch_size, max_length, hidden_size = batch_x.shape
