@@ -233,7 +233,6 @@ class Speller(nn.Module):
             seq_embedding_lengths
         )
         output_logits_seq = []
-        output_symbols_seq = []
         gumble = False
         for i in range(1, max_decode_length):
             hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
@@ -241,9 +240,7 @@ class Speller(nn.Module):
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
             cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
             output_logits_seq.append(cdn_out_i)
-            y_i = self.random_decode(cdn_out_i)
             y_i_gumble = gumbel_softmax(cdn_out_i, dim=1)
-            output_symbols_seq.append(y_i)
             prev_context = current_context
             if random.random() < tf_rate and batch_y is not None:
                 gumble = False
@@ -252,7 +249,7 @@ class Speller(nn.Module):
                 gumble = True
                 prev_y = y_i_gumble
 
-        return torch.stack(output_logits_seq, dim=1), torch.stack(output_symbols_seq, dim=0)
+        return torch.stack(output_logits_seq, dim=1)
 
     @staticmethod
     def random_decode(cdn_out):
@@ -305,5 +302,5 @@ class LAS(nn.Module):
         if self.training:
             seq_x = self.mask.forward(seq_x.transpose(1, 2)).transpose(1, 2)
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
-        logits, symbols = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
-        return logits, symbols
+        logits = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
+        return logits

@@ -138,9 +138,9 @@ def labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch
         batch_y = batch_y.to(device)
 
         if validation_mode:
-            output_logits, output_symbols = model.forward(batch_x, batch_seq_lengths)
+            output_logits = model.forward(batch_x, batch_seq_lengths)
         else:
-            output_logits, output_symbols = model.forward(batch_x, batch_seq_lengths, batch_y)
+            output_logits = model.forward(batch_x, batch_seq_lengths, batch_y)
 
         # We don't include <sos> when compute the loss
         batch_target_lengths = [l - 1 for l in batch_target_lengths]
