@@ -5,7 +5,6 @@ import os
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
-from torch.nn.functional import cross_entropy
 from phonetics import VOCAB
 from las import LAS
 
@@ -105,7 +104,7 @@ class UnlabeledDataset(Dataset):
         return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
 
-def train_epoch(training_loader, model, criterion, optimizer, scaler, current_epoch, scheduler=None):
+def train_epoch(training_loader, model, criterion, optimizer, scaler, current_epoch, scheduler=None, tf_scheduler=None):
     total_training_loss = 0.0
     total_samples = 0
     total_batches = len(training_loader)
@@ -124,6 +123,8 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         if scheduler is not None:
             current_epoch = current_epoch + b / total_batches
             scheduler.step(current_epoch)
+        if tf_scheduler is not None:
+            tf_scheduler.step()
         b += 1
 
     training_loss = "Training loss ", total_training_loss / total_samples
@@ -212,9 +213,8 @@ def train_las(params: dict):
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"])
     for epoch in range(n_epochs):
-        train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
+        train_epoch(training_loader, model, criterion, optimizer, scaler, epoch, tf_scheduler=tf_scheduler)
         val_loss = validate(model, val_loader)
-        tf_scheduler.step()
         print(f"Validation loss: {val_loss}")
 
 

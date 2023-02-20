@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import  pack_padded_sequence, pad_packed_sequence
 from torchaudio.transforms import FrequencyMasking, TimeMasking
-from torch.nn.functional import softmax
+from torch.nn.functional import softmax, gumbel_softmax
 from phonetics import SOS_TOKEN
 
 
@@ -204,9 +204,14 @@ class Speller(nn.Module):
         # Weight tying
         self.cdn.weight = self.char_embedding.weight
 
-    def spell_step(self, batch_prev_y, hx, prev_context):
+    def spell_step(self, batch_prev_y, hx, prev_context, gumble=False):
         # TODO: use 2 LSTMCell as per the paper
-        y_embeddings = self.char_embedding.forward(batch_prev_y)
+        if gumble:
+            # During training, the previous y may be sampled
+            # after gumble-softmax
+            y_embeddings = batch_prev_y @ self.char_embedding.weight
+        else:
+            y_embeddings = self.char_embedding.forward(batch_prev_y)
         lstm_inputs = torch.concat([y_embeddings, prev_context], dim=1)
         hx = self.decoder.forward(lstm_inputs, hx)
         return hx
@@ -229,19 +234,23 @@ class Speller(nn.Module):
         )
         output_logits_seq = []
         output_symbols_seq = []
+        gumble = False
         for i in range(1, max_decode_length):
-            hx = self.spell_step(prev_y, hx, prev_context)
+            hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
             current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([hx[0], current_context], dim=1)
             cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
             output_logits_seq.append(cdn_out_i)
             y_i = self.random_decode(cdn_out_i)
+            y_i_gumble = gumbel_softmax(cdn_out_i, dim=1)
             output_symbols_seq.append(y_i)
             prev_context = current_context
             if random.random() < tf_rate and batch_y is not None:
+                gumble = False
                 prev_y = batch_y[:, i]
             else:
-                prev_y = y_i
+                gumble = True
+                prev_y = y_i_gumble
 
         return torch.stack(output_logits_seq, dim=1), torch.stack(output_symbols_seq, dim=0)
 
@@ -287,9 +296,9 @@ class LAS(nn.Module):
         )
         self.mask = nn.Sequential()
         if freq_mask > 0:
-            self.mask.append(FrequencyMasking(freq_mask))
+            self.mask.append(FrequencyMasking(freq_mask, iid_masks=True))
         if time_mask > 0:
-            self.mask.append(TimeMasking(time_mask))
+            self.mask.append(TimeMasking(time_mask, iid_masks=True))
         self.tf_rate = teacher_force_rate
 
     def forward(self, seq_x, seq_lengths, seq_y=None):
