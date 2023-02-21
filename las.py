@@ -165,6 +165,19 @@ class Attention(nn.Module):
         return context, weights
 
 
+class SelfDecoder(nn.Module):
+    """
+    The SelfDecoder takes the audio embeddings and tries to
+    recover the original audio. Used to pretrain the Listener.
+    """
+    def __init__(self, seq_embedding_size):
+        super().__init__()
+        self._seq_embedding_size = seq_embedding_size
+        # Uses transpose 1-d CNNs that recovers the original audio from
+        # the audio embeddings
+
+
+
 class Listener(nn.Module):
     """
     Listener consists of 1D cnn and some specified layers of lstms

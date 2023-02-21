@@ -20,17 +20,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class StepTeacherForcingScheduler:
-    def __init__(self, model, step_size=0.05, min=0.5, patience=2):
+    def __init__(self, model, step_size=0.05, min=0.5):
         self._step_size = step_size
         self._min = min
         self._model = model
-        self._patience = patience
-        self._current_step = 0
 
     def step(self):
-        if self._current_step > 0 and self._current_step % self._patience == 0:
-            current_rf_rate = self._model.tf_rate
-            self._model.tf_rate = max(self._min, current_rf_rate - self._step_size)
+        current_rf_rate = self._model.tf_rate
+        self._model.tf_rate = max(self._min, current_rf_rate - self._step_size)
 
 
 def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
@@ -213,8 +210,9 @@ def train_las(params: dict):
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"])
     for epoch in range(n_epochs):
-        train_epoch(training_loader, model, criterion, optimizer, scaler, epoch, tf_scheduler=tf_scheduler)
+        train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss = validate(model, val_loader)
+        tf_scheduler.step()
         print(f"Validation loss: {val_loss}")
 
 
