@@ -236,7 +236,7 @@ def pretrain_epoch(model, training_loader, criterion, optimizer):
         loss = criterion(packed_batch_x.data, packed_batch_x_hat.data)
         loss.backward()
         optimizer.step()
-        total_loss += (float(loss) * total_samples)
+        total_loss += (float(loss) * batch_size)
 
     training_loss = "Pre-training loss ", total_loss / total_samples
     print(training_loss)
