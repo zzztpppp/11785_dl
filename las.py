@@ -165,6 +165,32 @@ class Attention(nn.Module):
         return context, weights
 
 
+class ConvTransposed1DBlock(nn.Module):
+    def __init__(self, input_channels, output_channels):
+        super().__init__()
+        self.layer = nn.Sequential(
+            nn.ConvTranspose1d(input_channels, output_channels, kernel_size=3),
+            ResidualBlock1D(output_channels, output_channels, kernel_size=3),
+            ResidualBlock1D(output_channels, output_channels, kernel_size=3)
+        )
+
+    def forward(self, batch_x):
+        return self.layer.forward(batch_x)
+
+
+class SelfDecoder(nn.Module):
+    def __init__(self, input_channels, output_channels, increasing_factor):
+        super().__init__()
+        self.layer = nn.Sequential()
+        for _ in range(increasing_factor):
+            self.layer.append(ConvTransposed1DBlock(input_channels, input_channels // 2))
+            input_channels = input_channels // 2
+        self.layer.append(ResidualBlock1D(input_channels, output_channels, kernel_size=3))
+
+    def forward(self, batch_x):
+        return self.layer.forward(batch_x)
+
+
 class Listener(nn.Module):
     """
     Listener consists of 1D cnn and some specified layers of lstms
@@ -286,11 +312,16 @@ class LAS(nn.Module):
         """
         super().__init__()
         self.listener = Listener(15, seq_embedding_size, plstm_layers, encoder_dropout)
+        listener_embedding_size = seq_embedding_size * (2 ** plstm_layers)
         self.speller = Speller(
-            seq_embedding_size * (2 ** plstm_layers),
+            listener_embedding_size,
             char_embedding_size,
             output_size
         )
+
+        # Used to pretrain the listener
+        self.self_decoder = SelfDecoder(listener_embedding_size, 15, plstm_layers)
+
         self.mask = nn.Sequential()
         if freq_mask > 0:
             self.mask.append(FrequencyMasking(freq_mask, iid_masks=True))
@@ -304,3 +335,9 @@ class LAS(nn.Module):
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
         logits = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
         return logits
+
+    def self_decoder_forward(self, seq_x, seq_lengths):
+        seq_embeddings, _ = self.lister.forward(seq_x, seq_lengths)
+        seq_x_recovered = self.self_decoder.forward(seq_embeddings.mean(dim=2))
+        return seq_x_recovered
+
