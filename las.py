@@ -337,7 +337,7 @@ class LAS(nn.Module):
         return logits
 
     def self_decoder_forward(self, seq_x, seq_lengths):
-        seq_embeddings, _ = self.lister.forward(seq_x, seq_lengths)
+        seq_embeddings, _ = self.listener.forward(seq_x, seq_lengths)
         seq_x_recovered = self.self_decoder.forward(seq_embeddings.mean(dim=2))
         return seq_x_recovered
 
