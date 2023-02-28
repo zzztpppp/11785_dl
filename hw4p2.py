@@ -220,7 +220,7 @@ def train_las(params: dict):
         print(f"Validation loss: {val_loss}")
 
 
-def pretrain_epoch(model, training_loader, criterion, optimizer):
+def pretrain_epoch(model, training_loader, criterion, optimizer, scaler):
     model.train()
     total_loss = 0.0
     total_samples = 0
@@ -233,9 +233,12 @@ def pretrain_epoch(model, training_loader, criterion, optimizer):
         batch_x_hat = model.self_decoder_forward(batch_x, x_lengths)
         packed_batch_x = pack_padded_sequence(batch_x, x_lengths, True, False)
         packed_batch_x_hat = pack_padded_sequence(batch_x_hat, x_lengths, True, False)
-        loss = criterion(packed_batch_x.data, packed_batch_x_hat.data)
-        loss.backward()
-        optimizer.step()
+        with torch.cuda.amp.autocast():
+            loss = criterion(packed_batch_x.data, packed_batch_x_hat.data)
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         total_loss += (float(loss) * batch_size)
 
     training_loss = "Pre-training loss ", total_loss / total_samples
@@ -245,8 +248,9 @@ def pretrain_epoch(model, training_loader, criterion, optimizer):
 def pretrain(model, training_loader, n_epochs):
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters())
+    scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs):
-        pretrain_epoch(model, training_loader, criterion, optimizer)
+        pretrain_epoch(model, training_loader, criterion, optimizer, scaler)
 
 
 if __name__ == "__main__":
