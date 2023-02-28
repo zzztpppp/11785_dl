@@ -169,7 +169,7 @@ class ConvTransposed1DBlock(nn.Module):
     def __init__(self, input_channels, output_channels):
         super().__init__()
         self.layer = nn.Sequential(
-            nn.ConvTranspose1d(input_channels, output_channels, kernel_size=3),
+            nn.ConvTranspose1d(input_channels, output_channels, kernel_size=3, stride=2),
             ResidualBlock1D(output_channels, output_channels, kernel_size=3),
             ResidualBlock1D(output_channels, output_channels, kernel_size=3)
         )
