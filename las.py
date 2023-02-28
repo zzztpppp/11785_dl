@@ -338,7 +338,9 @@ class LAS(nn.Module):
 
     def self_decoder_forward(self, seq_x, seq_lengths):
         seq_embeddings, _ = self.listener.forward(seq_x, seq_lengths)
+        print(seq_x.shape)
         print(seq_embeddings.shape)
-        seq_x_recovered = self.self_decoder.forward(seq_embeddings.mean(dim=1))
+        seq_x_recovered = self.self_decoder.forward(seq_embeddings.mean(dim=1, keepdim=True).transpose(1, 2)).transpose(1, 2)
+        print(seq_x_recovered.shape)
         return seq_x_recovered
 
