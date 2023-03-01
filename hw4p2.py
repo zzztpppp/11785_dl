@@ -187,7 +187,6 @@ def train_las(params: dict):
     print(params)
     print(model)
     n_epochs = params["n_epochs"]
-    n_pretraining_epochs = params["n_pretraining_epochs"]
     data_root = params["data_root"]
     num_workers = params["num_dataloader_workers"]
     training_loader = get_labeled_data_loader(
@@ -211,8 +210,6 @@ def train_las(params: dict):
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"])
 
-    pretrain(model, training_loader, n_pretraining_epochs)
-
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss = validate(model, val_loader)
@@ -220,44 +217,10 @@ def train_las(params: dict):
         print(f"Validation loss: {val_loss}")
 
 
-def pretrain_epoch(model, training_loader, criterion, optimizer, scaler):
-    model.train()
-    total_loss = 0.0
-    total_samples = 0
-    for  (batch_x, _), (x_lengths, _) in tqdm(training_loader):
-        model.to(device)
-        batch_size = batch_x.shape[0]
-        total_samples += batch_size
-        batch_x = batch_x.to(device)
-        optimizer.zero_grad()
-        batch_x_hat = model.self_decoder_forward(batch_x, x_lengths)
-        packed_batch_x = pack_padded_sequence(batch_x, x_lengths, True, False)
-        packed_batch_x_hat = pack_padded_sequence(batch_x_hat, x_lengths, True, False)
-        with torch.cuda.amp.autocast():
-            loss = criterion(packed_batch_x.data, packed_batch_x_hat.data)
-
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-        total_loss += (float(loss) * batch_size)
-
-    training_loss = "Pre-training loss ", total_loss / total_samples
-    print(training_loss)
-
-
-def pretrain(model, training_loader, n_epochs):
-    criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters())
-    scaler = torch.cuda.amp.GradScaler()
-    for epoch in range(n_epochs):
-        pretrain_epoch(model, training_loader, criterion, optimizer, scaler)
-
-
 if __name__ == "__main__":
     # The input size is typically (batch_size, max_seq_length, 15)
     parser = argparse.ArgumentParser()
     parser.add_argument("data_root", type=str)
-    parser.add_argument("--n_pretraining_epochs", type=int, default=0)
     parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)

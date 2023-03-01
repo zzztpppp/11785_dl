@@ -319,9 +319,6 @@ class LAS(nn.Module):
             output_size
         )
 
-        # Used to pretrain the listener
-        self.self_decoder = SelfDecoder(listener_embedding_size, 15, plstm_layers)
-
         self.mask = nn.Sequential()
         if freq_mask > 0:
             self.mask.append(FrequencyMasking(freq_mask, iid_masks=True))
@@ -329,15 +326,16 @@ class LAS(nn.Module):
             self.mask.append(TimeMasking(time_mask, iid_masks=True))
         self.tf_rate = teacher_force_rate
 
+        # From the LAS paper. Weights are initialized by Uniform(-0.1, 0.1)
+        for param in self.listener.parameters():
+            torch.nn.init.uniform_(param, -0.1, 0.1)
+
+        for param in self.speller.parameters():
+            torch.nn.init.uniform_(param, -0.1, 0.1)
+
     def forward(self, seq_x, seq_lengths, seq_y=None):
         if self.training:
             seq_x = self.mask.forward(seq_x.transpose(1, 2)).transpose(1, 2)
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
         logits = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
         return logits
-
-    def self_decoder_forward(self, seq_x, seq_lengths):
-        seq_embeddings, _ = self.listener.forward(seq_x, seq_lengths)
-        seq_x_recovered = self.self_decoder.forward(seq_embeddings.transpose(1, 2)).transpose(1, 2)
-        return seq_x_recovered
-
