@@ -184,6 +184,11 @@ def train_las(params: dict):
         params["frequency_mask"],
         params["time_mask"]
     )
+    pretrained_listener_path = params["pretrained_listener_path"]
+    if pretrained_listener_path is not None:
+        print(f"Load pretrained listener {pretrained_listener_path}")
+        model.speller.load_state_dict(torch.load(pretrained_listener_path))
+
     print(params)
     print(model)
     n_epochs = params["n_epochs"]
@@ -221,6 +226,7 @@ if __name__ == "__main__":
     # The input size is typically (batch_size, max_seq_length, 15)
     parser = argparse.ArgumentParser()
     parser.add_argument("data_root", type=str)
+    parser.add_argument("--pretrained_listener_path", type=str, default=None)
     parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
