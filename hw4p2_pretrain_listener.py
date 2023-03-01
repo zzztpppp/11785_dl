@@ -76,9 +76,10 @@ def pretrain_listener(params):
         batch_size=params["training_batch_size"],
         num_workers=num_workers
     )
+    listener_out_size = seq_embedding_size * (2 ** n_plstm_layers)
     listener_model = Listener(
         15,
-        seq_embedding_size,
+        listener_out_size,
         n_plstm_layers,
         params["encoder_dropout"]
     )
