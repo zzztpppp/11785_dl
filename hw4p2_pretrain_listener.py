@@ -59,7 +59,7 @@ def pretrain(trainee, trainer, training_dataloader, n_epochs):
     scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs):
         pretrain_epoch(pretraining_model, training_dataloader, criterion, optimizer, scaler)
-        lr_scheduler.step(epoch)
+        lr_scheduler.step()
 
 
 def pretrain_listener(params):

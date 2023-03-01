@@ -190,7 +190,7 @@ class SelfDecoder(nn.Module):
 
     def forward(self, batch_x):
         raw = self.layer.forward(batch_x)
-        return self.linear.forward(raw.transpose(1, 2))
+        return self.linear.forward(raw.transpose(1, 2)).transpose(1, 2)
 
 
 class Listener(nn.Module):
