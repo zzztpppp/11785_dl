@@ -67,7 +67,7 @@ def pretrain_listener(params):
     data_root = params["data_root"]
     num_workers = params["num_dataloader_workers"]
     n_plstm_layers = params["plstm_layers"]
-    seq_embedding_size = params["seq_embeddding_size"],
+    seq_embedding_size = params["seq_embedding_size"],
     training_loader = get_labeled_data_loader(
         data_root,
         training_x_dir,
