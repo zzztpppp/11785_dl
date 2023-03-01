@@ -186,9 +186,11 @@ class SelfDecoder(nn.Module):
             self.layer.append(ConvTransposed1DBlock(input_channels, input_channels // 2))
             input_channels = input_channels // 2
         self.layer.append(ResidualBlock1D(input_channels, output_channels, kernel_size=3))
+        self.linear = nn.Linear(output_channels, output_channels)
 
     def forward(self, batch_x):
-        return self.layer.forward(batch_x)
+        raw = self.layer.forward(batch_x)
+        return self.linear.forward(raw.transpose(1, 2))
 
 
 class Listener(nn.Module):
