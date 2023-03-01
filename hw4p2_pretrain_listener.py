@@ -76,14 +76,15 @@ def pretrain_listener(params):
         batch_size=params["training_batch_size"],
         num_workers=num_workers
     )
-    listener_out_size = seq_embedding_size * (2 ** n_plstm_layers)
     listener_model = Listener(
         15,
-        listener_out_size,
+        seq_embedding_size,
         n_plstm_layers,
         params["encoder_dropout"]
     )
-    self_decoder_model = SelfDecoder(seq_embedding_size, 15, n_plstm_layers)
+    listener_out_size = seq_embedding_size * (2 ** n_plstm_layers)
+
+    self_decoder_model = SelfDecoder(listener_out_size, 15, n_plstm_layers)
     pretrain(trainee=listener_model, trainer=self_decoder_model,
              training_dataloader=training_loader, n_epochs=n_epochs)
 
