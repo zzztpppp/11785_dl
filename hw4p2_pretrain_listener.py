@@ -51,7 +51,7 @@ def pretrain_epoch(model, training_loader, criterion, optimizer, scaler):
     print(training_loss)
 
 
-def pretrain(trainee, trainer, training_dataloader, validation_dataloader, n_epochs):
+def pretrain(trainee, trainer, training_dataloader, n_epochs):
     pretraining_model = PretrainerModel(trainer, trainee)
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(pretraining_model.parameters())
@@ -76,15 +76,6 @@ def pretrain_listener(params):
         batch_size=params["training_batch_size"],
         num_workers=num_workers
     )
-    val_loader = get_labeled_data_loader(
-        data_root,
-        dev_x_dir,
-        dev_y_dir,
-        shuffle=False,
-        batch_size=params["validation_batch_size"],
-        num_workers=num_workers
-    )
-
     listener_model = Listener(
         15,
         seq_embedding_size,
@@ -93,7 +84,7 @@ def pretrain_listener(params):
     )
     self_decoder_model = SelfDecoder(seq_embedding_size, 15, n_plstm_layers)
     pretrain(trainee=listener_model, trainer=self_decoder_model,
-             training_dataloader=training_loader, validation_dataloader=val_loader, n_epochs=n_epochs)
+             training_dataloader=training_loader, n_epochs=n_epochs)
 
     torch.save(listener_model.state_dict(), "pretrained_listener")
 
