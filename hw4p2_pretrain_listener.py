@@ -36,7 +36,7 @@ def pretrain_epoch(model, training_loader, criterion, optimizer, scaler):
         total_samples += batch_size
         batch_x = batch_x.to(device)
         optimizer.zero_grad()
-        batch_x_hat = model.self_decoder_forward(batch_x, x_lengths)
+        batch_x_hat = model.forward(batch_x, x_lengths)
         packed_batch_x = pack_padded_sequence(batch_x, x_lengths, True, False)
         packed_batch_x_hat = pack_padded_sequence(batch_x_hat, x_lengths, True, False)
         with torch.cuda.amp.autocast():
