@@ -187,7 +187,7 @@ def train_las(params: dict):
     pretrained_listener_path = params["pretrained_listener_path"]
     if pretrained_listener_path is not None:
         print(f"Load pretrained listener {pretrained_listener_path}")
-        model.speller.load_state_dict(torch.load(pretrained_listener_path))
+        model.listener.load_state_dict(torch.load(pretrained_listener_path))
 
     print(params)
     print(model)
