@@ -120,16 +120,13 @@ class PyLSTMEncoder(nn.Module):
             self.locked_dropout.append(LockedDropout(dropout))
 
     def forward(self, batch_x, seq_lengths):
-        print(batch_x.shape)
         packed_x = pack_padded_sequence(batch_x, seq_lengths, batch_first=True, enforce_sorted=False)
         packed_b_out, _ = self.b_lstm.forward(packed_x)
         padded_b_out, _ = pad_packed_sequence(packed_b_out, batch_first=True)
         padded_b_out = self.locked_dropout.forward(padded_b_out)
-        print(padded_b_out.shape)
         p_input, p_size = padded_b_out, seq_lengths
         for p_lstm in self.p_lstms:
             p_input, p_size = p_lstm.forward(p_input, p_size)
-            print(p_input.shape)
         return p_input, p_size
 
 
@@ -347,6 +344,7 @@ class LAS(nn.Module):
             torch.nn.init.uniform_(param, -0.1, 0.1)
 
     def forward(self, seq_x, seq_lengths, seq_y=None):
+        torch.cuda.empty_cache()
         if self.training:
             seq_x = self.mask.forward(seq_x.transpose(1, 2)).transpose(1, 2)
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
