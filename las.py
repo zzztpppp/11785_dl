@@ -120,6 +120,7 @@ class PyLSTMEncoder(nn.Module):
             self.locked_dropout.append(LockedDropout(dropout))
 
     def forward(self, batch_x, seq_lengths):
+        print(batch_x.shape)
         packed_x = pack_padded_sequence(batch_x, seq_lengths, batch_first=True, enforce_sorted=False)
         packed_b_out, _ = self.b_lstm.forward(packed_x)
         padded_b_out, _ = pad_packed_sequence(packed_b_out, batch_first=True)

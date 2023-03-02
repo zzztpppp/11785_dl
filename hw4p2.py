@@ -232,7 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--validation_batch_size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--weight_decay", type=float, default=0.0)
-    parser.add_argument("--embedding_size", type=int, default=256)
+    parser.add_argument("--embedding_size", type=int, default=512)
     parser.add_argument("--plstm_layers", type=int, default=3)
     parser.add_argument("--encoder_dropout", type=float, default=0.5)
     parser.add_argument("--decoder_dropout", type=float, default=0.5)
