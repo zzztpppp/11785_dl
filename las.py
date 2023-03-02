@@ -102,7 +102,7 @@ class PyLSTMEncoder(nn.Module):
         :param layers:
         """
         super().__init__()
-        self.b_lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True, batch_first=True)
+        self.b_lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size // 2, bidirectional=True, batch_first=True)
         # Since each p-lstm is also bidirectional, the output size
         # is x4 the specified hidden size given that adjacent time-steps are concatenated.
         # the final output is the size of hidden_size
