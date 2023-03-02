@@ -67,7 +67,7 @@ def pretrain_listener(params):
     data_root = params["data_root"]
     num_workers = params["num_dataloader_workers"]
     n_plstm_layers = params["plstm_layers"]
-    seq_embedding_size = params["seq_embedding_size"]
+    embedding_size = params["seq_embedding_size"]
     training_loader = get_labeled_data_loader(
         data_root,
         training_x_dir,
@@ -78,13 +78,12 @@ def pretrain_listener(params):
     )
     listener_model = Listener(
         15,
-        seq_embedding_size,
+        embedding_size,
         n_plstm_layers,
         params["encoder_dropout"]
     )
-    listener_out_size = seq_embedding_size * (2 ** n_plstm_layers)
 
-    self_decoder_model = SelfDecoder(listener_out_size, 15, n_plstm_layers)
+    self_decoder_model = SelfDecoder(embedding_size, 15, n_plstm_layers)
     pretrain(trainee=listener_model, trainer=self_decoder_model,
              training_dataloader=training_loader, n_epochs=n_epochs)
 
@@ -98,7 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
-    parser.add_argument("--seq_embedding_size", type=int, default=32)
+    parser.add_argument("--embedding_size", type=int, default=512)
     parser.add_argument("--plstm_layers", type=int, default=3)
     parser.add_argument("--encoder_dropout", type=float, default=0.5)
     parser.add_argument("--time_mask", type=int, default=30)
