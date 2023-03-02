@@ -102,16 +102,16 @@ class PyLSTMEncoder(nn.Module):
         :param layers:
         """
         super().__init__()
-        self.b_lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size // 2, bidirectional=True, batch_first=True)
+        self.b_lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, bidirectional=True, batch_first=True)
         # Since each p-lstm is also bidirectional, the output size
-        # is x4 the input size given that adjacent time-steps are concatenated.
+        # is x4 the specified hidden size given that adjacent time-steps are concatenated.
+        # the final output is the size of hidden_size
         self.p_lstms = nn.ModuleList()
         for i in range(layers):
-            p_hidden_size = hidden_size * (2 ** (i + 1))
             self.p_lstms.append(
                 PyramidLSTM(
-                    input_size=p_hidden_size,
-                    hidden_size=p_hidden_size // 2,
+                    input_size=hidden_size * 2,
+                    hidden_size=hidden_size // 2,
                     dropout=dropout
                 )
             )
@@ -127,6 +127,7 @@ class PyLSTMEncoder(nn.Module):
         p_input, p_size = padded_b_out, seq_lengths
         for p_lstm in self.p_lstms:
             p_input, p_size = p_lstm.forward(p_input, p_size)
+            print(p_input.shape)
         return p_input, p_size
 
 
@@ -216,18 +217,21 @@ class Listener(nn.Module):
 
 
 class Speller(nn.Module):
-    def __init__(self, seq_embedding_size, char_embedding_size, output_size):
+    def __init__(self, embedding_size, output_size):
         super().__init__()
 
-        self.hidden_size = char_embedding_size // 2
+        self.hidden_size = embedding_size
         self.output_size = output_size
-        self.char_embedding_size = char_embedding_size
-        self.seq_embedding_size = seq_embedding_size
-        context_size = char_embedding_size // 2
-        self.attend_layer = Attention(seq_embedding_size, context_size)
-        self.char_embedding = nn.Embedding(output_size, char_embedding_size)
-        self.decoder = nn.LSTMCell(context_size + char_embedding_size, char_embedding_size // 2)
-        self.cdn = nn.Linear(char_embedding_size, output_size)
+        context_size = embedding_size
+        self.attend_layer = Attention(embedding_size, context_size)
+        self.char_embedding = nn.Embedding(output_size, embedding_size)
+        self.decoder_1 = nn.LSTMCell(context_size + embedding_size, embedding_size + context_size)
+        self.decoder_2 = nn.LSTMCell(context_size + embedding_size, embedding_size)
+        self.transformation = nn.Sequential(
+            nn.Linear(context_size + embedding_size, embedding_size),
+            nn.ReLU()
+        )
+        self.cdn = nn.Linear(embedding_size, output_size)
 
         # Weight tying
         self.cdn.weight = self.char_embedding.weight
@@ -240,9 +244,16 @@ class Speller(nn.Module):
             y_embeddings = batch_prev_y @ self.char_embedding.weight
         else:
             y_embeddings = self.char_embedding.forward(batch_prev_y)
+
+        if hx is None:
+            hx_1, hx_2 = None, None
+        else:
+            hx_1, hx_2 = hx
+
         lstm_inputs = torch.concat([y_embeddings, prev_context], dim=1)
-        hx = self.decoder.forward(lstm_inputs, hx)
-        return hx
+        hx_1 = self.decoder_1.forward(lstm_inputs, hx_1)
+        hx_2 = self.decoder_2.forward(hx_1[0], hx_2)
+        return hx_1, hx_2
 
     def forward(self, seq_embeddings, seq_embedding_lengths, batch_y=None, tf_rate=1.0):
         batch_size = seq_embeddings.shape[0]
@@ -264,9 +275,10 @@ class Speller(nn.Module):
         gumble = False
         for i in range(1, max_decode_length):
             hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
-            current_context, _ = self.attend_layer.forward(hx[0], seq_embeddings, seq_embedding_lengths)
-            cdn_inputs = torch.concat([hx[0], current_context], dim=1)
-            cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
+            spell_out = hx[1][0]  # The hidden state from the second layer
+            current_context, _ = self.attend_layer.forward(spell_out, seq_embeddings, seq_embedding_lengths)
+            cdn_inputs = torch.concat([spell_out, current_context], dim=1)
+            cdn_out_i = self.cdn.forward(self.transformation.forward(cdn_inputs))  # (batch, output_size)
             output_logits_seq.append(cdn_out_i)
             y_i_gumble = gumbel_softmax(cdn_out_i, dim=1)
             prev_context = current_context
@@ -289,8 +301,7 @@ class Speller(nn.Module):
 class LAS(nn.Module):
     def __init__(
             self,
-            char_embedding_size,
-            seq_embedding_size,
+            embedding_size,
             output_size,
             plstm_layers,
             teacher_force_rate,
@@ -313,11 +324,9 @@ class LAS(nn.Module):
         :param encoder_dropout: dropout rate for the encoder
         """
         super().__init__()
-        self.listener = Listener(15, seq_embedding_size, plstm_layers, encoder_dropout)
-        listener_embedding_size = seq_embedding_size * (2 ** plstm_layers)
+        self.listener = Listener(15, embedding_size, plstm_layers, encoder_dropout)
         self.speller = Speller(
-            listener_embedding_size,
-            char_embedding_size,
+            embedding_size,
             output_size
         )
 

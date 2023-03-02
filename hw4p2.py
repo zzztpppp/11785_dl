@@ -175,8 +175,7 @@ def validate(model: torch.nn.Module, dev_loader):
 
 def train_las(params: dict):
     model = LAS(
-        params['char_embedding_size'],
-        params['seq_embedding_size'],
+        params['embedding_size'],
         len(VOCAB),
         params['plstm_layers'],
         params['tf_rate'],
@@ -233,8 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--validation_batch_size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--weight_decay", type=float, default=0.0)
-    parser.add_argument("--char_embedding_size", type=int, default=256)
-    parser.add_argument("--seq_embedding_size", type=int, default=32)
+    parser.add_argument("--embedding_size", type=int, default=256)
     parser.add_argument("--plstm_layers", type=int, default=3)
     parser.add_argument("--encoder_dropout", type=float, default=0.5)
     parser.add_argument("--decoder_dropout", type=float, default=0.5)
