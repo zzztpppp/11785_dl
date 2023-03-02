@@ -135,6 +135,7 @@ class Attention(nn.Module):
         super().__init__()
         self._hidden_dim = hidden_dim
         self._key_dim = key_dim
+        print(hidden_dim, key_dim)
         self._key_mlp = nn.Linear(hidden_dim, key_dim)
         self._value_mlp = nn.Linear(hidden_dim, key_dim)
 
@@ -236,7 +237,6 @@ class Speller(nn.Module):
         self.cdn.weight = self.char_embedding.weight
 
     def spell_step(self, batch_prev_y, hx, prev_context, gumble=False):
-        # TODO: use 2 LSTMCell as per the paper
         if gumble:
             # During training, the previous y may be sampled
             # after gumble-softmax
@@ -273,6 +273,7 @@ class Speller(nn.Module):
         output_logits_seq = []
         gumble = False
         for i in range(1, max_decode_length):
+            torch.cuda.empty_cache()
             hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
             spell_out = hx[1][0]  # The hidden state from the second layer
             current_context, _ = self.attend_layer.forward(spell_out, seq_embeddings, seq_embedding_lengths)
@@ -344,7 +345,6 @@ class LAS(nn.Module):
             torch.nn.init.uniform_(param, -0.1, 0.1)
 
     def forward(self, seq_x, seq_lengths, seq_y=None):
-        torch.cuda.empty_cache()
         if self.training:
             seq_x = self.mask.forward(seq_x.transpose(1, 2)).transpose(1, 2)
         seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
