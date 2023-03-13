@@ -187,6 +187,9 @@ def train_las(params: dict):
     if pretrained_listener_path is not None:
         print(f"Load pretrained listener {pretrained_listener_path}")
         model.listener.load_state_dict(torch.load(pretrained_listener_path))
+        # Freeze the pretrained layer
+        for parameter in model.listener.parameters():
+            parameter.requires_grad = False
 
     print(params)
     print(model)
