@@ -227,6 +227,13 @@ class Speller(nn.Module):
         self.char_embedding = nn.Embedding(output_size, embedding_size)
         self.decoder_1 = nn.LSTMCell(context_size + embedding_size, embedding_size + context_size)
         self.decoder_2 = nn.LSTMCell(context_size + embedding_size, embedding_size)
+        self.decoder = nn.LSTM(
+            input_size=context_size + embedding_size,
+            hidden_size=embedding_size,
+            num_layers=2,
+            batch_first=True
+        )
+
         self.transformation = nn.Sequential(
             nn.Linear(context_size + embedding_size, embedding_size),
             nn.ReLU()
@@ -244,15 +251,10 @@ class Speller(nn.Module):
         else:
             y_embeddings = self.char_embedding.forward(batch_prev_y)
 
-        if hx is None:
-            hx_1, hx_2 = None, None
-        else:
-            hx_1, hx_2 = hx
 
         lstm_inputs = torch.concat([y_embeddings, prev_context], dim=1)
-        hx_1 = self.decoder_1.forward(lstm_inputs, hx_1)
-        hx_2 = self.decoder_2.forward(hx_1[0], hx_2)
-        return hx_1, hx_2
+        output, hx = self.decoder.forward(lstm_inputs[:, None, :])
+        return output.squeeze(1), hx
 
     def forward(self, seq_embeddings, seq_embedding_lengths, batch_y=None, tf_rate=1.0):
         batch_size = seq_embeddings.shape[0]
@@ -274,8 +276,7 @@ class Speller(nn.Module):
         gumble = False
         for i in range(1, max_decode_length):
             torch.cuda.empty_cache()
-            hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
-            spell_out = hx[1][0]  # The hidden state from the second layer
+            spell_out, hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
             current_context, _ = self.attend_layer.forward(spell_out, seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([spell_out, current_context], dim=1)
             cdn_out_i = self.cdn.forward(self.transformation.forward(cdn_inputs))  # (batch, output_size)
