@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from las import Speller
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from hw4p2 import training_y_dir, dev_x_dir, device
+from hw4p2 import training_y_dir, dev_y_dir, device
 from las import Speller
 
 
@@ -50,20 +50,10 @@ def pretrain_epoch(model: Speller, training_loader, criterion, optimizer, scaler
     total_samples = 0
     model.to(device)
     # During pretraining, set the input context to 0s
-    psuedo_context = torch.zeros(1, 1, model.context_size).to(device)
+    pseudo_context = torch.zeros(1, 1, model.context_size).to(device)
     for (batch_x, batch_y), batch_lengths in tqdm(training_loader):
         batch_size, max_seq_length = batch_x.shape
-        batch_x = batch_x.to(device)  # (B, L, V)
-        batch_y = batch_y.to(device)
-
-        batch_x_chars = model.char_embedding.forward(batch_x)  # (B, L, E)
-        batch_x_chars = torch.cat([batch_x_chars,
-                                   psuedo_context.expand(batch_size, max_seq_length, model.context_size)], dim=2)
-        packed_batch_x = pack_padded_sequence(batch_x_chars, batch_lengths, batch_first=True, enforce_sorted=False)
-        packed_lstm_out, _ = model.decoder.forward(packed_batch_x)
-        packed_batch_y_dist = model.cdn.forward(packed_lstm_out.data)
-        packed_batch_y = pack_padded_sequence(batch_y, batch_lengths, batch_first=True, enforce_sorted=False)
-        loss = criterion(packed_batch_y_dist, packed_batch_y.data)
+        loss = pretrain_forward(model, batch_x, batch_y, batch_lengths, criterion, pseudo_context)
         total_loss += (float(loss) * batch_size)
         total_samples += batch_size
         optimizer.zero_grad()
@@ -74,11 +64,45 @@ def pretrain_epoch(model: Speller, training_loader, criterion, optimizer, scaler
     print(training_loss)
 
 
+def pretrain_forward(model, batch_x, batch_y, batch_lengths, criterion, pseudo_context):
+    batch_size, max_seq_length = batch_x.shape
+    batch_x = batch_x.to(device)  # (B, L, V)
+    batch_y = batch_y.to(device)
+
+    batch_x_chars = model.char_embedding.forward(batch_x)  # (B, L, E)
+    batch_x_chars = torch.cat([batch_x_chars,
+                               pseudo_context.expand(batch_size, max_seq_length, model.context_size)], dim=2)
+    packed_batch_x = pack_padded_sequence(batch_x_chars, batch_lengths, batch_first=True, enforce_sorted=False)
+    packed_lstm_out, _ = model.decoder.forward(packed_batch_x)
+    packed_batch_y_dist = model.cdn.forward(packed_lstm_out.data)
+    packed_batch_y = pack_padded_sequence(batch_y, batch_lengths, batch_first=True, enforce_sorted=False)
+    loss = criterion(packed_batch_y_dist, packed_batch_y.data)
+    return loss
+
+
+def validate(model: Speller, validation_loader, criterion):
+    model.evel()
+    model.to(device)
+    total_loss = 0.0
+    total_samples = 0
+    pseudo_context = torch.zeros(1, 1, model.context_size).to(device)
+    with torch.inference_mode():
+        for (batch_x, batch_y), batch_lengths in tqdm(validation_loader):
+            batch_size, max_seq_length = batch_x.shape
+            loss = pretrain_forward(model, batch_x, batch_y, batch_lengths, criterion, pseudo_context)
+            total_loss += (float(loss) * batch_size)
+            total_samples += batch_size
+    validation_loss = f"Speller pretraining validation loss {total_loss / total_samples}"
+    print(validation_loss)
+
+
 def pretrain(params):
     data_root = params["data_root"]
     num_workers = params["num_dataloader_workers"]
     batch_size = params["training_batch_size"]
+    validation_batch_size = params["validation_batch_size"]
     train_loader = get_dataloader(data_root, training_y_dir, num_workers=num_workers, batch_size=batch_size)
+    val_loader = get_dataloader(data_root, )
     speller = Speller(
         embedding_size=params["embedding_size"],
         output_size=len(VOCAB)
@@ -88,6 +112,7 @@ def pretrain(params):
     n_epochs = params["n_epochs"]
     for epoch in range(n_epochs):
         pretrain_epoch(speller, train_loader, criterion, optimizer, None)
+        validate(speller, validation_loader=val_loader, criterion=criterion)
 
 
 if __name__ == "__main__":
@@ -96,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
+    parser.add_argument("--validation_batch_size", type=int, default=128)
     parser.add_argument("--embedding_size", type=int, default=512)
     args = parser.parse_args()
     pretrain(vars(args))
