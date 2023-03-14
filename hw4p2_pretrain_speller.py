@@ -59,7 +59,6 @@ def pretrain_epoch(model: Speller, training_loader, criterion, optimizer, scaler
         batch_x_chars = model.char_embedding.forward(batch_x)  # (B, L, E)
         batch_x_chars = torch.cat([batch_x_chars,
                                    psuedo_context.expand(batch_size, max_seq_length, model.context_size)], dim=2)
-        print(batch_x_chars.shape)
         packed_batch_x = pack_padded_sequence(batch_x_chars, batch_lengths, batch_first=True, enforce_sorted=False)
         packed_lstm_out, _ = model.decoder.forward(packed_batch_x)
         packed_batch_y_dist = model.cdn.forward(packed_lstm_out.data)
