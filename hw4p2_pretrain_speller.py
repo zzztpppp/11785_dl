@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from las import Speller
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from hw4p2 import training_y_dir, dev_y_dir, device
+from hw4p2_train import training_y_dir, dev_y_dir, device
 from las import Speller
 
 

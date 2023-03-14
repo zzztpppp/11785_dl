@@ -1,5 +1,5 @@
 import argparse
-from hw4p2 import (
+from hw4p2_train import (
     get_labeled_data_loader,
     training_x_dir,
     training_y_dir,
