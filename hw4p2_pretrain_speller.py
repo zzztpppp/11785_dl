@@ -64,7 +64,7 @@ def pretrain_epoch(model: Speller, training_loader, criterion, optimizer, scaler
         packed_lstm_out, _ = model.decoder.forward(packed_batch_x)
         packed_batch_y_dist = model.cdn.forward(packed_lstm_out.data)
         packed_batch_y = pack_padded_sequence(batch_y, batch_lengths, batch_first=True, enforce_sorted=False)
-        loss = criterion(packed_batch_y_dist, packed_batch_y)
+        loss = criterion(packed_batch_y_dist, packed_batch_y.data)
         total_loss += (float(loss) * batch_size)
         total_samples += batch_size
         optimizer.zero_grad()
