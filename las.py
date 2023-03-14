@@ -222,20 +222,18 @@ class Speller(nn.Module):
 
         self.hidden_size = embedding_size
         self.output_size = output_size
-        context_size = embedding_size
-        self.attend_layer = Attention(embedding_size, context_size)
+        self.context_size = embedding_size
+        self.attend_layer = Attention(embedding_size, self.context_size)
         self.char_embedding = nn.Embedding(output_size, embedding_size)
-        self.decoder_1 = nn.LSTMCell(context_size + embedding_size, embedding_size + context_size)
-        self.decoder_2 = nn.LSTMCell(context_size + embedding_size, embedding_size)
         self.decoder = nn.LSTM(
-            input_size=context_size + embedding_size,
+            input_size=self.context_size + embedding_size,
             hidden_size=embedding_size,
             num_layers=2,
             batch_first=True
         )
 
         self.transformation = nn.Sequential(
-            nn.Linear(context_size + embedding_size, embedding_size),
+            nn.Linear(self.context_size + embedding_size, embedding_size),
             nn.ReLU()
         )
         self.cdn = nn.Linear(embedding_size, output_size)
@@ -250,7 +248,6 @@ class Speller(nn.Module):
             y_embeddings = batch_prev_y @ self.char_embedding.weight
         else:
             y_embeddings = self.char_embedding.forward(batch_prev_y)
-
 
         lstm_inputs = torch.concat([y_embeddings, prev_context], dim=1)
         output, hx = self.decoder.forward(lstm_inputs[:, None, :])
@@ -272,6 +269,7 @@ class Speller(nn.Module):
             seq_embeddings,
             seq_embedding_lengths
         )
+
         output_logits_seq = []
         gumble = False
         for i in range(1, max_decode_length):
