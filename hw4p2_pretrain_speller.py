@@ -114,6 +114,8 @@ def pretrain(params):
         pretrain_epoch(speller, train_loader, criterion, optimizer, None)
         validate(speller, validation_loader=val_loader, criterion=criterion)
 
+    torch.save(speller.state_dict(), "pretrained_speller")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
