@@ -62,7 +62,7 @@ def pretrain_epoch(model: Speller, training_loader, criterion, optimizer, scaler
         print(batch_x_chars.shape)
         packed_batch_x = pack_padded_sequence(batch_x_chars, batch_lengths, batch_first=True, enforce_sorted=False)
         packed_lstm_out = model.decoder.forward(packed_batch_x)
-        packed_batch_y_dist = model.cdn.forward(packed_lstm_out.data)
+        packed_batch_y_dist, _ = model.cdn.forward(packed_lstm_out.data)
         packed_batch_y = pack_padded_sequence(batch_y, batch_lengths, batch_first=True, enforce_sorted=False)
         loss = criterion(packed_batch_y_dist, packed_batch_y)
         total_loss += (float(loss) * batch_size)
