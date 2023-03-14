@@ -2,11 +2,12 @@
 import torch
 import os
 import numpy as np
+import argparse
 from phonetics import VOCAB
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from las import Speller
-from torch.nn.utils.rnn import pad_sequence
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from hw4p2 import training_y_dir, dev_x_dir, device
 from las import Speller
 
@@ -24,7 +25,7 @@ class PretrainDataset(Dataset):
         data = self.data[index]
         length = self.seq_lengths[index]
         data = np.array([VOCAB.index(c) for c in data])
-        return (data[:1], data[1:]), length - 1
+        return (data[:-1], data[1:]), length - 1
 
     @staticmethod
     def collate_fn(batch):
@@ -43,16 +44,34 @@ def get_dataloader(data_root, path, **kwargs):
     return data_loader
 
 
-def pretrain_epoch(model, training_loader, criterion, optimizer, scaler):
+def pretrain_epoch(model: Speller, training_loader, criterion, optimizer, scaler):
     model.train()
     total_loss = 0.0
     total_samples = 0
     model.to(device)
+    # During pretraining, set the input context to 0s
+    psuedo_context = torch.zeros(1, 1, model.context_size).to(device)
     for (batch_x, batch_y), batch_lengths in tqdm(training_loader):
-        batch_x = batch_x.to(device)
+        batch_size, max_seq_length = batch_x.shape
+        batch_x = batch_x.to(device)  # (B, L, V)
         batch_y = batch_y.to(device)
-        model.forward(batch_x)
 
+        batch_x_chars = model.char_embedding.forward(batch_x)  # (B, L, E)
+        batch_x_chars = torch.cat([batch_x_chars,
+                                   psuedo_context.expand(batch_size, max_seq_length, model.context_size)])
+        packed_batch_x = pack_padded_sequence(batch_x_chars, batch_lengths, batch_first=True, enforce_sorted=False)
+        packed_lstm_out = model.decoder.forward(packed_batch_x)
+        packed_batch_y_dist = model.cdn.forward(packed_lstm_out.data)
+        packed_batch_y = pack_padded_sequence(batch_y, batch_lengths, batch_first=True, enforce_sorted=False)
+        loss = criterion(packed_batch_y_dist, packed_batch_y)
+        total_loss += (float(loss) * batch_size)
+        total_samples += batch_size
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    training_loss = f"Speller pretraining loss {total_loss / total_samples}"
+    print(training_loss)
 
 
 def pretrain(params):
@@ -64,6 +83,20 @@ def pretrain(params):
         embedding_size=params["embedding_size"],
         output_size=len(VOCAB)
     )
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(speller.parameters(), lr=0.01)
     n_epochs = params["n_epochs"]
     for epoch in range(n_epochs):
-        pass
+        pretrain_epoch(speller, train_loader, criterion, optimizer, None)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("data_root", type=str)
+    parser.add_argument("--n_epochs", type=int, default=50)
+    parser.add_argument("--num_dataloader_workers", type=int, default=2)
+    parser.add_argument("--training_batch_size", type=int, default=32)
+    parser.add_argument("--embedding_size", type=int, default=512)
+    args = parser.parse_args()
+    pretrain(vars(args))
+    print("done")
