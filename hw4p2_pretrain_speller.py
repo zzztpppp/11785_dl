@@ -13,8 +13,8 @@ from las import Speller
 
 
 class PretrainDataset(Dataset):
-    def __init__(self, dir):
-        data_file_list = sorted([os.path.join(dir, p) for p in os.listdir(dir)])
+    def __init__(self, data_dir):
+        data_file_list = sorted([os.path.join(data_dir, p) for p in os.listdir(data_dir)])
         self.data = [np.load(p, allow_pickle=True) for p in data_file_list]
         self.seq_lengths = [x.shape[0] for x in self.data]
 
@@ -81,7 +81,7 @@ def pretrain_forward(model, batch_x, batch_y, batch_lengths, criterion, pseudo_c
 
 
 def validate(model: Speller, validation_loader, criterion):
-    model.evel()
+    model.eval()
     model.to(device)
     total_loss = 0.0
     total_samples = 0
