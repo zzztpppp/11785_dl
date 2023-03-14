@@ -102,7 +102,7 @@ def pretrain(params):
     batch_size = params["training_batch_size"]
     validation_batch_size = params["validation_batch_size"]
     train_loader = get_dataloader(data_root, training_y_dir, num_workers=num_workers, batch_size=batch_size)
-    val_loader = get_dataloader(data_root, dev_y_dir)
+    val_loader = get_dataloader(data_root, dev_y_dir, num_workers=num_workers, batch_size=validation_batch_size)
     speller = Speller(
         embedding_size=params["embedding_size"],
         output_size=len(VOCAB)
