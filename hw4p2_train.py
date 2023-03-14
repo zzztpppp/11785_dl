@@ -20,9 +20,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class StepTeacherForcingScheduler:
-    def __init__(self, model, step_size=0.05, min=0.5):
+    def __init__(self, model, step_size=0.05, min_rate=0.5):
         self._step_size = step_size
-        self._min = min
+        self._min = min_rate
         self._model = model
 
     def step(self):
@@ -171,6 +171,24 @@ def validate(model: torch.nn.Module, dev_loader):
             total_samples += batch_size
 
     return total_loss / total_samples
+
+
+def random_decode(batch_logits):
+    """
+    Randomly draw from the character distribution after softmax
+
+    :param batch_logits: (B, L, V)
+    :return: batch_vac (B, L)
+    """
+    probs = torch.softmax(batch_logits, dim=2)
+    characters = torch.multinomial(probs, 1).squeeze(2)
+    return characters
+
+
+def compute_distance(batch_y_hat, batch_y, batch_lengths):
+    for y_hat, y, length in zip(batch_y_hat, batch_y, batch_lengths):
+        pass
+
 
 
 def train_las(params: dict):
