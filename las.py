@@ -154,11 +154,12 @@ class Attention(nn.Module):
         weights = (self._key_mlp.forward(embedding_seq) * query[:, None, :]).sum(dim=2)
         weights = softmax(weights / torch.sqrt(torch.tensor(hidden_size)).to(query.device), dim=1)
 
-        weights = weights / weights.sum(dim=1, keepdim=True)
+        weights = weights * boolean_mask
 
         # According to the hw4p2 write-up, to get the weights corresponding to the variable lengthened embedding seqs,
         # just ignore the rest and re-normalize
-        weights = weights * boolean_mask
+        weights = weights / weights.sum(dim=1, keepdim=True)
+
         return weights
 
     def forward(self, query: torch.Tensor, embedding_seq: torch.Tensor, batch_seq_lengths: list):
