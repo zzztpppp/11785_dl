@@ -131,13 +131,13 @@ class PyLSTMEncoder(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, hidden_dim, key_dim):
+    def __init__(self, hidden_dim, key_dim, val_dim):
         super().__init__()
         self._hidden_dim = hidden_dim
         self._key_dim = key_dim
-        print(hidden_dim, key_dim)
+        self._val_dim = val_dim
         self._key_mlp = nn.Linear(hidden_dim, key_dim)
-        self._value_mlp = nn.Linear(hidden_dim, key_dim)
+        self._value_mlp = nn.Linear(hidden_dim, val_dim)
 
     def forward(self, query: torch.Tensor, embedding_seq: torch.Tensor, batch_seq_lengths: list):
         """
@@ -150,19 +150,22 @@ class Attention(nn.Module):
         boolean_mask = torch.tile(
             torch.arange(0, max_length, device=query.device)[None, :],
             (batch_size, 1)
-        )[:, :, None] # (batch_size, max_length, 1). Expand to allow broadcasting on the last dim
-        boolean_mask = boolean_mask.lt(torch.tensor(batch_seq_lengths).to(query.device)[:, None, None])
-        masked_embedding = embedding_seq * boolean_mask
+        )[:, :] # (batch_size, max_length).
+        boolean_mask = boolean_mask.lt(torch.tensor(batch_seq_lengths).to(query.device)[:, None])
 
         # For each query in the batch, compute
         # its context.
-        keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
-        values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
-        weights = softmax(
-            (keys * query[:, None, :]).sum(dim=2) / torch.sqrt(torch.tensor(hidden_size)).to(query.device),
-            dim=1
-        )
-        context = (values * weights[:, :, None]).sum(dim=1)
+        # keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
+        # values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
+        weights = (self._key_mlp.forward(embedding_seq) * query[:, None, :]).sum(dim=2)
+        weights = softmax(weights / torch.sqrt(torch.tensor(hidden_size)).to(query.device), dim=1)
+
+        # According to the hw4p2 write-up, to get the weights corresponding to the variable lengthened embedding seqs,
+        # just ignore the rest and re-normalize
+        weights = weights * boolean_mask
+        weights = weights / weights.sum(dim=1)
+        context = (self._value_mlp.forward(embedding_seq * weights[:, :, None])).sum(dim=1)
+
         return context, weights
 
 
