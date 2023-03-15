@@ -163,7 +163,7 @@ class Attention(nn.Module):
         # According to the hw4p2 write-up, to get the weights corresponding to the variable lengthened embedding seqs,
         # just ignore the rest and re-normalize
         weights = weights * boolean_mask
-        weights = weights / weights.sum(dim=1)
+        weights = weights / weights.sum(dim=1, keepdim=True)
         context = (self._value_mlp.forward(embedding_seq * weights[:, :, None])).sum(dim=1)
 
         return context, weights
