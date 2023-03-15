@@ -190,7 +190,6 @@ def compute_distance(batch_y_hat, batch_y, batch_lengths):
         pass
 
 
-
 def train_las(params: dict):
     model = LAS(
         params['embedding_size'],
@@ -202,12 +201,17 @@ def train_las(params: dict):
         params["time_mask"]
     )
     pretrained_listener_path = params["pretrained_listener_path"]
+    pretrained_speller_path = params["pretrained_speller_path"]
     if pretrained_listener_path is not None:
         print(f"Load pretrained listener {pretrained_listener_path}")
         model.listener.load_state_dict(torch.load(pretrained_listener_path))
         # Freeze the pretrained layer
         for parameter in model.listener.parameters():
             parameter.requires_grad = False
+
+    if pretrained_speller_path is not None:
+        print(f"Load pretrained speller {pretrained_speller_path}")
+        model.speller.load_state_dict(torch.load(pretrained_speller_path))
 
     print(params)
     print(model)
@@ -247,6 +251,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("data_root", type=str)
     parser.add_argument("--pretrained_listener_path", type=str, default=None)
+    parser.add_argument("--pretrained_speller_path", type=str, default=None)
     parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
