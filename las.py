@@ -226,12 +226,12 @@ class Listener(nn.Module):
 
 
 class Speller(nn.Module):
-    def __init__(self, embedding_size, output_size):
+    def __init__(self, embedding_size, context_size, output_size):
         super().__init__()
 
         self.hidden_size = embedding_size
         self.output_size = output_size
-        self.context_size = embedding_size
+        self.context_size = context_size
         self.attend_layer = Attention(embedding_size, embedding_size, self.context_size)
         self.char_embedding = nn.Embedding(output_size, embedding_size)
         self.decoder = nn.LSTM(
@@ -310,6 +310,7 @@ class LAS(nn.Module):
     def __init__(
             self,
             embedding_size,
+            context_size,
             output_size,
             plstm_layers,
             teacher_force_rate,
@@ -335,6 +336,7 @@ class LAS(nn.Module):
         self.listener = Listener(15, embedding_size, plstm_layers, encoder_dropout)
         self.speller = Speller(
             embedding_size,
+            context_size,
             output_size
         )
 

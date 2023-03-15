@@ -193,6 +193,7 @@ def compute_distance(batch_y_hat, batch_y, batch_lengths):
 def train_las(params: dict):
     model = LAS(
         params['embedding_size'],
+        params['context_size'],
         len(VOCAB),
         params['plstm_layers'],
         params['tf_rate'],
@@ -259,6 +260,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--embedding_size", type=int, default=512)
+    parser.add_argument("--context_size", type=int, default=512)
     parser.add_argument("--plstm_layers", type=int, default=3)
     parser.add_argument("--encoder_dropout", type=float, default=0.5)
     parser.add_argument("--decoder_dropout", type=float, default=0.5)
