@@ -226,7 +226,7 @@ class Speller(nn.Module):
         self.hidden_size = embedding_size
         self.output_size = output_size
         self.context_size = embedding_size
-        self.attend_layer = Attention(embedding_size, self.context_size)
+        self.attend_layer = Attention(embedding_size, embedding_size, self.context_size)
         self.char_embedding = nn.Embedding(output_size, embedding_size)
         self.decoder = nn.LSTM(
             input_size=self.context_size + embedding_size,
