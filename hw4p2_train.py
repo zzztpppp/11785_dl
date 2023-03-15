@@ -1,3 +1,4 @@
+import Levenshtein
 import numpy as np
 import torch
 import argparse
@@ -5,7 +6,7 @@ import os
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
-from phonetics import VOCAB
+from phonetics import VOCAB, EOS_TOKEN
 from las import LAS
 
 training_x_dir = os.path.join("train-clean-100", "mfcc")
@@ -111,7 +112,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         batch_size = batch_y.shape[0]
         model.to(device)
         optimizer.zero_grad()
-        loss = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths)
+        loss, _ = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths)
         total_training_loss += (float(loss) * batch_size)
         total_samples += batch_size
         scaler.scale(loss).backward()
@@ -128,7 +129,16 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
     print(training_loss)
 
 
-def labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths, validation_mode=False):
+def labeled_forward(
+        model,
+        criterion,
+        batch_x,
+        batch_y,
+        batch_seq_lengths,
+        batch_target_lengths,
+        validation_mode=False,
+        decode=False
+):
 
     with torch.cuda.amp.autocast():
         batch_x = batch_x.to(device)
@@ -138,6 +148,11 @@ def labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch
             output_logits = model.forward(batch_x, batch_seq_lengths)
         else:
             output_logits = model.forward(batch_x, batch_seq_lengths, batch_y)
+
+        # Decode for validation
+        batch_y_hat = None
+        if decode:
+            batch_y_hat = argmax_decode(output_logits)
 
         # We don't include <sos> when compute the loss
         batch_target_lengths = [l - 1 for l in batch_target_lengths]
@@ -154,41 +169,54 @@ def labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch
             enforce_sorted=False
         )
         loss = criterion(packed_logits.data, packed_targets.data)
-    return loss
+    return loss, batch_y_hat
 
 
-def validate(model: torch.nn.Module, dev_loader):
+def validate(model: torch.nn.Module, dev_loader, distance=False):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
+    total_distance = 0.0
     total_samples = 0
     criterion = torch.nn.CrossEntropyLoss()
     with torch.inference_mode():
         for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(dev_loader):
             batch_size = batch_y.shape[0]
-            loss = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths, True)
+            loss, batch_y_hat = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths,
+                                                batch_target_lengths, True, distance)
+            if compute_distance:
+                distance = compute_distance(batch_y_hat, batch_y, batch_target_lengths)
+                total_distance = total_distance + batch_size * total_loss
+
             total_loss = total_loss + batch_size * float(loss)
             total_samples += batch_size
 
-    return total_loss / total_samples
+    return total_loss / total_samples, total_distance / total_samples
 
 
-def random_decode(batch_logits):
+def argmax_decode(batch_logits):
     """
     Randomly draw from the character distribution after softmax
 
     :param batch_logits: (B, L, V)
     :return: batch_vac (B, L)
     """
-    probs = torch.softmax(batch_logits, dim=2)
-    characters = torch.multinomial(probs, 1).squeeze(2)
+    characters = torch.argmax(batch_logits, dim=2)
     return characters
 
 
 def compute_distance(batch_y_hat, batch_y, batch_lengths):
+    total_distance = 0.0
     for y_hat, y, length in zip(batch_y_hat, batch_y, batch_lengths):
-        pass
+        y_string = ''.join([VOCAB[char] for char in y[:length]])
 
+        y_hat_char = [VOCAB[char] for char in y_hat]
+        y_hat_string = ''.join(y_hat_char[:y_hat_char.index(VOCAB[EOS_TOKEN])])
+
+        # Exclude <sos> and <eos>
+        distance = Levenshtein.distance(y_string, y_hat_string)
+        total_distance += distance
+    return total_distance / len(batch_lengths)
 
 def train_las(params: dict):
     model = LAS(
@@ -242,9 +270,9 @@ def train_las(params: dict):
 
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
-        val_loss = validate(model, val_loader)
+        val_loss, val_distance = validate(model, val_loader, True)
         tf_scheduler.step()
-        print(f"Validation loss: {val_loss}")
+        print(f"Validation loss: {val_loss}. validation_distance {val_distance}")
 
 
 if __name__ == "__main__":
