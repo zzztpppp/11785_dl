@@ -210,8 +210,12 @@ def compute_distance(batch_y_hat, batch_y, batch_lengths):
     for y_hat, y, length in zip(batch_y_hat, batch_y, batch_lengths):
         y_string = ''.join([VOCAB[char] for char in y[:length]])
 
-        y_hat_char = [VOCAB[char] for char in y_hat]
-        y_hat_string = ''.join(y_hat_char[:y_hat_char.index(VOCAB[EOS_TOKEN])])
+        y_hat_char = []
+        for char in y_hat:
+            y_hat_char.append(VOCAB[char])
+            if char == EOS_TOKEN:
+                break
+        y_hat_string = ''.join(y_hat_char)
 
         # Exclude <sos> and <eos>
         distance = Levenshtein.distance(y_string, y_hat_string)
