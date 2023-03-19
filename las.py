@@ -82,13 +82,13 @@ class PyramidLSTM(nn.Module):
         return padded_out, seq_lengths_resized
 
     @staticmethod
-    def reduce_length(batch_x: torch.tensor, seq_lengths: list) -> (torch.tensor, list):
+    def reduce_length(batch_x: torch.tensor, seq_lengths) -> (torch.Tensor, torch.Tensor):
         batch_size, max_length, hidden_size = batch_x.shape
         # With num of time steps reduced by a number of 2
         # and hidden sizes increased by a number of 2.
         max_length = max_length - (max_length % 2)
         reduced_batch_x = batch_x[:, : max_length, :].contiguous().reshape(batch_size, max_length // 2, hidden_size * 2)
-        reduced_seq_lengths = [l // 2 for l in seq_lengths]
+        reduced_seq_lengths = seq_lengths // 2
 
         return reduced_batch_x, reduced_seq_lengths
 
@@ -120,7 +120,7 @@ class PyLSTMEncoder(nn.Module):
             self.locked_dropout.append(LockedDropout(dropout))
 
     def forward(self, batch_x, seq_lengths):
-        packed_x = pack_padded_sequence(batch_x, seq_lengths, batch_first=True, enforce_sorted=False)
+        packed_x = pack_padded_sequence(batch_x, seq_lengths.cpu(), batch_first=True, enforce_sorted=False)
         packed_b_out, _ = self.b_lstm.forward(packed_x)
         padded_b_out, _ = pad_packed_sequence(packed_b_out, batch_first=True)
         padded_b_out = self.locked_dropout.forward(padded_b_out)
@@ -146,19 +146,13 @@ class Attention(nn.Module):
         # values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
         batch_size, max_length, hidden_size = embedding_seq.shape
 
-        boolean_mask = torch.tile(
-            torch.arange(0, max_length, device=query.device)[None, :],
-            (batch_size, 1)
-        )[:, :] # (batch_size, max_length).
-        boolean_mask = boolean_mask.lt(torch.tensor(batch_seq_lengths).to(query.device)[:, None])
-        weights = (self._key_mlp.forward(embedding_seq) * query[:, None, :]).sum(dim=2)
-        weights = softmax(weights / torch.sqrt(torch.tensor(hidden_size)).to(query.device), dim=1)
-
-        weights = weights * boolean_mask
-
-        # According to the hw4p2 write-up, to get the weights corresponding to the variable lengthened embedding seqs,
-        # just ignore the rest and re-normalize
-        weights = weights / weights.sum(dim=1, keepdim=True)
+        mask = torch.arange(0, max_length, device=query.device)[None, :]  # (1, max_length)
+        mask = mask >= batch_seq_lengths[:, None].to(query.device)
+        energy = torch.bmm(self._key_mlp.forward(embedding_seq), query[:, :, None])  # (B, T, 1)
+        energy = energy.squeeze(2)  # (B, T)
+        filling_value = -1e+30 if energy.dtype == torch.float32 else -1e+4
+        energy = energy.masked_fill(mask, filling_value)
+        weights = softmax(energy / torch.sqrt(torch.tensor(hidden_size)).to(query.device), dim=1)
 
         return weights
 
@@ -171,7 +165,7 @@ class Attention(nn.Module):
         """
 
         weights = self._get_weights(query, embedding_seq, batch_seq_lengths)
-        context = (self._value_mlp.forward(embedding_seq * weights[:, :, None])).sum(dim=1)
+        context = torch.bmm(weights[:, None, :], self._value_mlp.forward(embedding_seq)).squeeze(1)
 
         return context, weights
 
@@ -358,6 +352,6 @@ class LAS(nn.Module):
     def forward(self, seq_x, seq_lengths, seq_y=None):
         if self.training:
             seq_x = self.mask.forward(seq_x.transpose(1, 2)).transpose(1, 2)
-        seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths)
+        seq_embeddings, seq_embeddings_lengths = self.listener.forward(seq_x, seq_lengths.cpu())
         logits = self.speller.forward(seq_embeddings, seq_embeddings_lengths, seq_y, self.tf_rate)
         return logits
