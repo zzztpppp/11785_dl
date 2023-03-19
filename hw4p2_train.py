@@ -71,8 +71,8 @@ class LabeledDataset(Dataset):
     def collate_fn(batch):
         batch_x = [torch.tensor(x) for (x, _), _ in batch]
         batch_y = [torch.tensor(y, dtype=torch.long) for (_, y), _ in batch]
-        batch_seq_lengths = [l for _, (l, _) in batch]
-        batch_target_lengths = [t for _, (_, t) in batch]
+        batch_seq_lengths = torch.IntTensor([l for _, (l, _) in batch])
+        batch_target_lengths = torch.IntTensor([t for _, (_, t) in batch])
 
         # Pad variable length sequences
         padded_x = pad_sequence(batch_x, batch_first=True)
@@ -112,7 +112,7 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         batch_size = batch_y.shape[0]
         model.to(device)
         optimizer.zero_grad()
-        loss, _ = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths, batch_target_lengths)
+        loss, _ = labeled_forward(model, criterion, batch_x, batch_y, torch.IntTensor(batch_seq_lengths), batch_target_lengths)
         total_training_loss += (float(loss) * batch_size)
         total_samples += batch_size
         scaler.scale(loss).backward()
@@ -143,7 +143,8 @@ def labeled_forward(
     with torch.cuda.amp.autocast():
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
-
+        batch_seq_lengths = batch_seq_lengths.cpu()
+        batch_target_lengths = batch_target_lengths.cpu()
         if validation_mode:
             output_logits = model.forward(batch_x, batch_seq_lengths)
         else:
@@ -239,8 +240,8 @@ def train_las(params: dict):
         print(f"Load pretrained listener {pretrained_listener_path}")
         model.listener.load_state_dict(torch.load(pretrained_listener_path))
         # Freeze the pretrained layer
-        for parameter in model.listener.parameters():
-            parameter.requires_grad = False
+        # for parameter in model.listener.parameters():
+        #     parameter.requires_grad = False
 
     if pretrained_speller_path is not None:
         print(f"Load pretrained speller {pretrained_speller_path}")
@@ -271,7 +272,7 @@ def train_las(params: dict):
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"])
-
+    # model = torch.compile(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss, val_distance = validate(model, val_loader, True)
