@@ -272,11 +272,13 @@ def train_las(params: dict):
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"])
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["tf_step_size"], gamma=0.95)
     # model = torch.compile(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss, val_distance = validate(model, val_loader, True)
         tf_scheduler.step()
+        lr_scheduler.step()
         print(f"Validation loss: {val_loss}. validation_distance {val_distance}")
 
 
