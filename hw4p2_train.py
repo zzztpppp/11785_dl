@@ -177,7 +177,7 @@ def labeled_forward(
     return loss, batch_y_hat
 
 
-def validate(model: torch.nn.Module, dev_loader, distance=False):
+def validate(model: torch.nn.Module, dev_loader, compute_distance=False):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
@@ -188,10 +188,10 @@ def validate(model: torch.nn.Module, dev_loader, distance=False):
         for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(dev_loader):
             batch_size = batch_y.shape[0]
             loss, batch_y_hat = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths,
-                                                batch_target_lengths, True, distance)
+                                                batch_target_lengths, True, compute_distance)
             if compute_distance:
-                distance = compute_distance(batch_y_hat, batch_y, batch_target_lengths)
-                total_distance = total_distance + batch_size * total_loss
+                compute_distance = levenshtein_distance(batch_y_hat, batch_y, batch_target_lengths)
+                total_distance = total_distance + batch_size * total_distance
 
             total_loss = total_loss + batch_size * float(loss)
             total_samples += batch_size
@@ -210,7 +210,7 @@ def argmax_decode(batch_logits):
     return characters
 
 
-def compute_distance(batch_y_hat, batch_y, batch_lengths):
+def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
     total_distance = 0.0
     for y_hat, y, length in zip(batch_y_hat, batch_y, batch_lengths):
         y_string = ''.join([VOCAB[char] for char in y[:length]])
