@@ -157,7 +157,7 @@ def labeled_forward(
         # Decode for validation
         batch_y_hat = None
         if decode:
-            batch_y_hat = argmax_decode(output_logits)
+            batch_y_hat = softmax_decode(output_logits)
 
         # We don't include <sos> when compute the loss
         batch_target_lengths = batch_target_lengths - 1
@@ -200,14 +200,21 @@ def validate(model: torch.nn.Module, dev_loader, compute_distance=False) -> (flo
 
 
 def argmax_decode(batch_logits):
+    characters = torch.argmax(batch_logits, dim=2)
+    return characters
+
+
+def softmax_decode(batch_logits: torch.Tensor):
     """
     Randomly draw from the character distribution after softmax
 
     :param batch_logits: (B, L, V)
     :return: batch_vac (B, L)
     """
-    characters = torch.argmax(batch_logits, dim=2)
-    return characters
+    batch_size, max_length, _ = batch_logits.shape
+    probs = torch.nn.functional.softmax(batch_logits, dim=2)
+    samples = torch.multinomial(probs.reshape(batch_size * max_length, -1), 1).reshape(batch_size, max_length)
+    return samples
 
 
 def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
@@ -278,7 +285,7 @@ def train_las(params: dict):
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"], params["tf_reduce_rate"])
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["tf_step_size"], gamma=0.95)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["tf_step_size"], gamma=0.98)
     # model = torch.compile(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
