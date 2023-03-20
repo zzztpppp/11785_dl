@@ -177,7 +177,7 @@ def labeled_forward(
     return loss, batch_y_hat
 
 
-def validate(model: torch.nn.Module, dev_loader, compute_distance=False):
+def validate(model: torch.nn.Module, dev_loader, compute_distance=False) -> (float, float):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
@@ -190,8 +190,8 @@ def validate(model: torch.nn.Module, dev_loader, compute_distance=False):
             loss, batch_y_hat = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths,
                                                 batch_target_lengths, True, compute_distance)
             if compute_distance:
-                compute_distance = levenshtein_distance(batch_y_hat, batch_y, batch_target_lengths)
-                total_distance = total_distance + batch_size * total_distance
+                distance = levenshtein_distance(batch_y_hat, batch_y, batch_target_lengths)
+                total_distance = total_distance + distance
 
             total_loss = total_loss + batch_size * float(loss)
             total_samples += batch_size
@@ -225,7 +225,7 @@ def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
         # Exclude <sos> and <eos>
         distance = Levenshtein.distance(y_string, y_hat_string)
         total_distance += distance
-    return total_distance / len(batch_lengths)
+    return total_distance
 
 
 def train_las(params: dict):
