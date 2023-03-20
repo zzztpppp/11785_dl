@@ -21,14 +21,18 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class StepTeacherForcingScheduler:
-    def __init__(self, model, step_size=0.05, min_rate=0.5):
+    def __init__(self, model, step_size, reduce_rate, min_rate=0.5):
         self._step_size = step_size
+        self._reduce_rate = reduce_rate
         self._min = min_rate
         self._model = model
+        self._current_step = 0
 
     def step(self):
+        self._current_step += 1
         current_rf_rate = self._model.tf_rate
-        self._model.tf_rate = max(self._min, current_rf_rate - self._step_size)
+        if self._current_step % self._step_size == 0:
+            self._model.tf_rate = max(self._min, current_rf_rate - self._reduce_rate)
 
 
 def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
@@ -271,8 +275,8 @@ def train_las(params: dict):
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
-    tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"])
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.95)
+    tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"], params["tf_reduce_rate"])
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["tf_step_size"], gamma=0.95)
     # model = torch.compile(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
@@ -302,7 +306,8 @@ if __name__ == "__main__":
     parser.add_argument("--time_mask", type=int, default=30)
     parser.add_argument("--frequency_mask", type=int, default=3)
     parser.add_argument("--tf_rate", type=float, default=1.0)
-    parser.add_argument("--tf_step_size", type=float, default=0.025)
+    parser.add_argument("--tf_step_size", type=int, default=2)
+    parser.add_argument("--tf_reduce_rate", type=float, default=0.025)
     args = parser.parse_args()
     train_las(vars(args))
     print("done")
