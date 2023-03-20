@@ -163,13 +163,13 @@ def labeled_forward(
         batch_target_lengths = batch_target_lengths - 1
         packed_logits = pack_padded_sequence(
             output_logits,
-            torch.tensor(batch_target_lengths),
+            batch_target_lengths,
             batch_first=True,
             enforce_sorted=False
         )
         packed_targets = pack_padded_sequence(
             batch_y[:, 1:],
-            torch.tensor(batch_target_lengths),
+            batch_target_lengths,
             batch_first=True,
             enforce_sorted=False
         )
