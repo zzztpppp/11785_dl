@@ -47,7 +47,7 @@ def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
 class LabeledDataset(Dataset):
     # load the dataset
     def __init__(self, x, y):
-        # X and y are the directories containing training data and labelkk
+        # X and y are the directories containing training data and label
         x_file_list = sorted([os.path.join(x, p) for p in os.listdir(x)])
         y_file_list = sorted([os.path.join(y, p) for p in os.listdir(y)])
 
@@ -160,7 +160,7 @@ def labeled_forward(
             batch_y_hat = argmax_decode(output_logits)
 
         # We don't include <sos> when compute the loss
-        batch_target_lengths = [l - 1 for l in batch_target_lengths]
+        batch_target_lengths = batch_target_lengths - 1
         packed_logits = pack_padded_sequence(
             output_logits,
             torch.tensor(batch_target_lengths),
@@ -226,6 +226,7 @@ def compute_distance(batch_y_hat, batch_y, batch_lengths):
         distance = Levenshtein.distance(y_string, y_hat_string)
         total_distance += distance
     return total_distance / len(batch_lengths)
+
 
 def train_las(params: dict):
     model = LAS(
