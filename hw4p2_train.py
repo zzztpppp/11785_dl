@@ -235,6 +235,7 @@ def train_las(params: dict):
         params['plstm_layers'],
         params['tf_rate'],
         params["encoder_dropout"],
+        params["decoder_dropout"],
         params["frequency_mask"],
         params["time_mask"]
     )

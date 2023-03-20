@@ -221,7 +221,7 @@ class Listener(nn.Module):
 
 
 class Speller(nn.Module):
-    def __init__(self, embedding_size, context_size, output_size):
+    def __init__(self, embedding_size, context_size, output_size, dropout):
         super().__init__()
 
         self.hidden_size = embedding_size
@@ -233,7 +233,8 @@ class Speller(nn.Module):
             input_size=self.context_size + embedding_size,
             hidden_size=embedding_size,
             num_layers=2,
-            batch_first=True
+            batch_first=True,
+            dropout=dropout
         )
 
         self.transformation = nn.Sequential(
@@ -310,6 +311,7 @@ class LAS(nn.Module):
             plstm_layers,
             teacher_force_rate,
             encoder_dropout,
+            decoder_dropout,
             freq_mask,
             time_mask
     ):
@@ -320,8 +322,6 @@ class LAS(nn.Module):
         a factor of and increase final sequence embedding size by a factor of 2.
         So the sequence embedding size output by the lister is `seq_embedding_size` * (2 ** plstm_layers)
 
-        :param char_embedding_size:  Size for each input character embedding
-        :param seq_embedding_size: Size for each sequence embedding.
         :param output_size: Size of the vocabulary bag.
         :param plstm_layers: Number of pyramid lstm layers.
         :param teacher_force_rate: Initial teacher force rate during training.
@@ -332,7 +332,8 @@ class LAS(nn.Module):
         self.speller = Speller(
             embedding_size,
             context_size,
-            output_size
+            output_size,
+            decoder_dropout
         )
 
         self.mask = nn.Sequential()
