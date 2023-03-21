@@ -301,7 +301,7 @@ class Speller(nn.Module):
                 prev_y = self.random_decode(cdn_out_i)
                 output_char_seq.append(prev_y)
 
-        if not self.training
+        if not self.training:
             output_char_seq = torch.stack(output_char_seq, dim=1)
 
         return torch.stack(output_logits_seq, dim=1), output_char_seq
