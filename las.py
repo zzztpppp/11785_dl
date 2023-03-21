@@ -138,20 +138,34 @@ class Attention(nn.Module):
         self._val_dim = val_dim
         self._key_mlp = nn.Linear(hidden_dim, key_dim)
         self._value_mlp = nn.Linear(hidden_dim, val_dim)
+        self._query_mlp = nn.Linear(hidden_dim, key_dim)
+        self._mask = None
+
+    def set_mask(self, embedding_seq, embedding_seq_lengths):
+        """
+        Since each embedding seq is used in a loop
+        when decoding, so is the mask.
+
+        :return:
+        """
+        batch_size, max_length, hidden_size = embedding_seq.shape
+
+        mask = torch.arange(0, max_length, device=embedding_seq.device)[None, :]  # (1, max_length)
+        mask = mask >= embedding_seq_lengths[:, None].to(embedding_seq.device)
+        self._mask = mask
 
     def _get_weights(self, query, embedding_seq, batch_seq_lengths):
         # For each query in the batch, compute
         # its context.
-        # keys = self._key_mlp.forward(masked_embedding)  # (batch, max_length, key_dim)
-        # values = self._value_mlp.forward(masked_embedding)  # (batch, max_length, val_dim)
-        batch_size, max_length, hidden_size = embedding_seq.shape
+        _, _, hidden_size = query.shape
+        energy = torch.bmm(
+            self._key_mlp.forward(embedding_seq),
+            self._query_mlp.foward(query)[:, :, None]
+        )  # (B, T, 1)
 
-        mask = torch.arange(0, max_length, device=query.device)[None, :]  # (1, max_length)
-        mask = mask >= batch_seq_lengths[:, None].to(query.device)
-        energy = torch.bmm(self._key_mlp.forward(embedding_seq), query[:, :, None])  # (B, T, 1)
         energy = energy.squeeze(2)  # (B, T)
         filling_value = -1e+30 if energy.dtype == torch.float32 else -1e+4
-        energy = energy.masked_fill(mask, filling_value)
+        energy = energy.masked_fill(self._mask, filling_value)
         weights = softmax(energy / torch.sqrt(torch.tensor(hidden_size)).to(query.device), dim=1)
 
         return weights
@@ -264,6 +278,8 @@ class Speller(nn.Module):
         prev_y = torch.zeros(batch_size, dtype=torch.long, device=seq_embeddings.device)
         prev_y[:] = SOS_TOKEN
         hx = None
+        self.attend_layer.set_mask(seq_embeddings, seq_embedding_lengths)
+
         prev_context, _ = self.attend_layer.forward(
             torch.zeros(
                 batch_size,
@@ -311,6 +327,10 @@ class Speller(nn.Module):
         probs = torch.softmax(cdn_out, dim=-1)
         samples = torch.multinomial(probs, 1).squeeze(-1)
         return samples
+
+    @staticmethod
+    def greedy_decode(cdn_out):
+        return torch.argmax(cdn_out, dim=1)
 
 
 class LAS(nn.Module):
