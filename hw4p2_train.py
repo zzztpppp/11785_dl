@@ -224,12 +224,15 @@ def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
 
         y_hat_char = []
         for char in y_hat:
-            y_hat_char.append(VOCAB[char])
             if char == EOS_TOKEN:
                 break
+            y_hat_char.append(VOCAB[char])
         y_hat_string = ''.join(y_hat_char)
 
-        # Exclude <sos> and <eos>
+        # Exclude <sos> and <eos> in the ground truth
+        print(y_hat_string)
+        print(y_string)
+        y_hat_string = y_hat_string[1:-1]
         distance = Levenshtein.distance(y_string, y_hat_string)
         total_distance += distance
     return total_distance
@@ -281,6 +284,7 @@ def train_las(params: dict):
         batch_size=params["validation_batch_size"],
         num_workers=num_workers
     )
+
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
