@@ -134,14 +134,13 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
 
 
 def labeled_forward(
-        model,
+        model: LAS,
         criterion,
         batch_x,
         batch_y,
         batch_seq_lengths,
         batch_target_lengths,
         validation_mode=False,
-        decode=False
 ):
 
     with torch.cuda.amp.autocast():
@@ -149,15 +148,11 @@ def labeled_forward(
         batch_y = batch_y.to(device)
         batch_seq_lengths = batch_seq_lengths.cpu()
         batch_target_lengths = batch_target_lengths.cpu()
-        if validation_mode:
-            output_logits = model.forward(batch_x, batch_seq_lengths)
-        else:
-            output_logits = model.forward(batch_x, batch_seq_lengths, batch_y)
-
-        # Decode for validation
         batch_y_hat = None
-        if decode:
-            batch_y_hat = softmax_decode(output_logits)
+        if validation_mode:
+            output_logits, batch_y_hat = model.forward(batch_x, batch_seq_lengths)
+        else:
+            output_logits, _ = model.forward(batch_x, batch_seq_lengths, batch_y)
 
         # We don't include <sos> when compute the loss
         batch_target_lengths = batch_target_lengths - 1
@@ -177,7 +172,7 @@ def labeled_forward(
     return loss, batch_y_hat
 
 
-def validate(model: torch.nn.Module, dev_loader, compute_distance=False) -> (float, float):
+def validate(model: LAS, dev_loader, compute_distance=False) -> (float, float):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
@@ -188,7 +183,7 @@ def validate(model: torch.nn.Module, dev_loader, compute_distance=False) -> (flo
         for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in dev_loader:
             batch_size = batch_y.shape[0]
             loss, batch_y_hat = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths,
-                                                batch_target_lengths, True, compute_distance)
+                                                batch_target_lengths, True)
             if compute_distance:
                 distance = levenshtein_distance(batch_y_hat, batch_y, batch_target_lengths)
                 total_distance = total_distance + distance
