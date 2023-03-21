@@ -277,7 +277,7 @@ class Speller(nn.Module):
 
         output_logits_seq = []
         gumble = False
-        output_char_seq = []  # Output character-sequence when in validation mode.
+        output_char_seq = None if self.training else []  # Output character-sequence when in validation mode.
         for i in range(1, max_decode_length):
             torch.cuda.empty_cache()
             spell_out, hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
@@ -301,7 +301,10 @@ class Speller(nn.Module):
                 prev_y = self.random_decode(cdn_out_i)
                 output_char_seq.append(prev_y)
 
-        return torch.stack(output_logits_seq, dim=1), torch.stack(output_char_seq, dim=1)
+        if not self.training
+            output_char_seq = torch.stack(output_char_seq, dim=1)
+
+        return torch.stack(output_logits_seq, dim=1), output_char_seq
 
     @staticmethod
     def random_decode(cdn_out):
