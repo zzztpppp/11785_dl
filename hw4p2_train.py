@@ -185,7 +185,7 @@ def validate(model: torch.nn.Module, dev_loader, compute_distance=False) -> (flo
     total_samples = 0
     criterion = torch.nn.CrossEntropyLoss()
     with torch.inference_mode():
-        for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(dev_loader):
+        for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in dev_loader:
             batch_size = batch_y.shape[0]
             loss, batch_y_hat = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths,
                                                 batch_target_lengths, True, compute_distance)
