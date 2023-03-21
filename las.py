@@ -157,7 +157,7 @@ class Attention(nn.Module):
     def _get_weights(self, query, embedding_seq, batch_seq_lengths):
         # For each query in the batch, compute
         # its context.
-        _, _, hidden_size = query.shape
+        _, hidden_size = query.shape
         energy = torch.bmm(
             self._key_mlp.forward(embedding_seq),
             self._query_mlp.foward(query)[:, :, None]
