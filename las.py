@@ -160,7 +160,7 @@ class Attention(nn.Module):
         _, hidden_size = query.shape
         energy = torch.bmm(
             self._key_mlp.forward(embedding_seq),
-            self._query_mlp.foward(query)[:, :, None]
+            self._query_mlp.forward(query)[:, :, None]
         )  # (B, T, 1)
 
         energy = energy.squeeze(2)  # (B, T)
