@@ -286,12 +286,18 @@ class Speller(nn.Module):
             output_logits_seq.append(cdn_out_i)
             y_i_gumble = gumbel_softmax(cdn_out_i, dim=1)
             prev_context = current_context
-            if random.random() < tf_rate and batch_y is not None:
-                gumble = False
-                prev_y = batch_y[:, i]
+
+            if self.training:
+                if random.random() < tf_rate and batch_y is not None:
+                    gumble = False
+                    prev_y = batch_y[:, i]
+                else:
+                    gumble = True
+                    prev_y = y_i_gumble
+            # Validation
             else:
-                gumble = True
-                prev_y = y_i_gumble
+                gumble = False
+                prev_y = self.random_decode(cdn_out_i)
 
         return torch.stack(output_logits_seq, dim=1)
 
