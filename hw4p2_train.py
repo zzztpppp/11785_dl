@@ -219,9 +219,9 @@ def softmax_decode(batch_logits: torch.Tensor):
 
 def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
     total_distance = 0.0
+    sample_y_string, sample_y_hat_string = None, None
     for y_hat, y, length in zip(batch_y_hat, batch_y, batch_lengths):
-        y_string = ''.join([VOCAB[char] for char in y[:length]])
-
+        y_string = ''.join([VOCAB[char] for char in y[1:length - 1]])  # Remove <sos> and <eos>
         y_hat_char = []
         for char in y_hat:
             if char == EOS_TOKEN:
@@ -229,12 +229,15 @@ def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
             y_hat_char.append(VOCAB[char])
         y_hat_string = ''.join(y_hat_char)
 
-        # Exclude <sos> and <eos> in the ground truth
-        print(y_hat_string)
-        print(y_string)
-        y_hat_string = y_hat_string[1:-1]
+        # For print
+        sample_y_string, sample_y_hat_string = y_string, y_hat_string
         distance = Levenshtein.distance(y_string, y_hat_string)
         total_distance += distance
+
+    print("Ground truth")
+    print(sample_y_string)
+    print("prediction")
+    print(sample_y_hat_string)
     return total_distance
 
 
