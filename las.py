@@ -180,7 +180,8 @@ class Attention(nn.Module):
 
         weights = self._get_weights(query, embedding_seq, batch_seq_lengths)
         context = torch.bmm(weights[:, None, :], self._value_mlp.forward(embedding_seq)).squeeze(1)
-
+        print(context)
+        print(weights)
         return context, weights
 
 
@@ -298,7 +299,7 @@ class Speller(nn.Module):
             prev_context = current_context
 
             if self.training:
-                if random.random() < tf_rate and batch_y is not None:
+                if random.random() < tf_rate:
                     gumble = False
                     prev_y = batch_y[:, i]
                 else:
