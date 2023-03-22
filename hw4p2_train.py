@@ -284,7 +284,7 @@ def train_las(params: dict):
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"], params["tf_reduce_rate"])
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["tf_step_size"], gamma=0.98, verbose=True)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["lr_step_size"], gamma=0.98, verbose=True)
     # model = torch.compile(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
