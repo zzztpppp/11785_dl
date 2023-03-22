@@ -292,7 +292,7 @@ class Speller(nn.Module):
             spell_out, hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
             current_context, _ = self.attend_layer.forward(spell_out, seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([spell_out, current_context], dim=1)
-            cdn_out_i = self.cdn.forward(self.transformation.forward(cdn_inputs))  # (batch, output_size)
+            cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
             output_logits_seq.append(cdn_out_i)
             y_i_gumble = gumbel_softmax(cdn_out_i, dim=1)
             prev_context = current_context
