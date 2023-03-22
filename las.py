@@ -279,14 +279,13 @@ class Speller(nn.Module):
         prev_y[:] = SOS_TOKEN
         hx = None
         self.attend_layer.set_key_value(seq_embeddings, seq_embedding_lengths)
-
         prev_context, _ = self.attend_layer.forward(
             torch.zeros(
                 batch_size,
                 self.hidden_size,
                 device=seq_embeddings.device,
                 dtype=seq_embeddings.dtype
-            ),
+            )
         )
 
         output_logits_seq = []
