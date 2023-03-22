@@ -305,6 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--training_batch_size", type=int, default=32)
     parser.add_argument("--validation_batch_size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--lr_step_size", type=int, default=1)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--embedding_size", type=int, default=512)
     parser.add_argument("--context_size", type=int, default=512)
