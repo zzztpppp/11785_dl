@@ -37,7 +37,6 @@ class StepTeacherForcingScheduler:
             self._model.tf_rate = updated_rate
 
 
-
 def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
     x_dir = os.path.join(data_root, x_dir)
     y_dir = os.path.join(data_root, y_dir)
