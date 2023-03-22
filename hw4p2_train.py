@@ -32,7 +32,10 @@ class StepTeacherForcingScheduler:
         self._current_step += 1
         current_rf_rate = self._model.tf_rate
         if self._current_step % self._step_size == 0:
-            self._model.tf_rate = max(self._min, current_rf_rate - self._reduce_rate)
+            updated_rate = max(self._min, current_rf_rate - self._reduce_rate)
+            print(f"Update teacher-forcing rate to {updated_rate}")
+            self._model.tf_rate = updated_rate
+
 
 
 def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
@@ -282,7 +285,7 @@ def train_las(params: dict):
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
     tf_scheduler = StepTeacherForcingScheduler(model, params["tf_step_size"], params["tf_reduce_rate"])
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["tf_step_size"], gamma=0.98)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, params["tf_step_size"], gamma=0.98, verbose=True)
     # model = torch.compile(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
