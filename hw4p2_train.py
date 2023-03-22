@@ -165,6 +165,8 @@ def labeled_forward(
             batch_first=True,
             enforce_sorted=False
         )
+        print(packed_targets.sorted_indices)
+        print(packed_logits.sorted_indices)
         loss = criterion(packed_logits.data, packed_targets.data)
     return loss, batch_y_hat
 
