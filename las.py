@@ -294,7 +294,7 @@ class Speller(nn.Module):
             cdn_inputs = torch.concat([spell_out, current_context], dim=1)
             cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
             output_logits_seq.append(cdn_out_i)
-            y_i_gumble = gumbel_softmax(cdn_out_i, dim=1)
+            y_i_gumble = gumbel_softmax(cdn_out_i, dim=1, hard=True)
             prev_context = current_context
 
             if self.training:
