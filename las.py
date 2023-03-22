@@ -180,6 +180,8 @@ class Attention(nn.Module):
 
         weights = self._get_weights(query, embedding_seq)
         context = torch.bmm(weights[:, None, :], self._value_mlp.forward(embedding_seq)).squeeze(1)
+        print("query")
+        print(query)
         print("context")
         print(context)
         print("weights")
