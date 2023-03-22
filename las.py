@@ -140,8 +140,10 @@ class Attention(nn.Module):
         self._value_mlp = nn.Linear(hidden_dim, val_dim)
         self._query_mlp = nn.Linear(hidden_dim, key_dim)
         self._mask = None
+        self._key = None
+        self._value = None
 
-    def set_mask(self, embedding_seq, embedding_seq_lengths):
+    def set_key_value(self, embedding_seq, embedding_seq_lengths):
         """
         Since each embedding seq is used in a loop
         when decoding, so is the mask.
@@ -149,17 +151,19 @@ class Attention(nn.Module):
         :return:
         """
         batch_size, max_length, hidden_size = embedding_seq.shape
-
         mask = torch.arange(0, max_length, device=embedding_seq.device)[None, :]  # (1, max_length)
         mask = mask >= embedding_seq_lengths[:, None].to(embedding_seq.device)
-        self._mask = mask
 
-    def _get_weights(self, query, embedding_seq):
+        self._mask = mask
+        self._key = self._key_mlp.forward(embedding_seq)
+        self._value = self._value_mlp.forward(embedding_seq)
+
+    def _get_weights(self, query):
         # For each query in the batch, compute
         # its context.
         _, hidden_size = query.shape
         energy = torch.bmm(
-            self._key_mlp.forward(embedding_seq),
+            self._key,
             self._query_mlp.forward(query)[:, :, None]
         )  # (B, T, 1)
 
@@ -170,16 +174,14 @@ class Attention(nn.Module):
 
         return weights
 
-    def forward(self, query: torch.Tensor, embedding_seq: torch.Tensor, batch_seq_lengths: list):
+    def forward(self, query: torch.Tensor):
         """
         :param query: tensor of size (batch, hidden)
-        :param embedding_seq: (batch, max_length, hidden_dim)
-        :param batch_seq_lengths: the length of each sequence in the batch
         :return:
         """
 
-        weights = self._get_weights(query, embedding_seq)
-        context = torch.bmm(weights[:, None, :], self._value_mlp.forward(embedding_seq)).squeeze(1)
+        weights = self._get_weights(query)
+        context = torch.bmm(weights[:, None, :], self._value).squeeze(1)
         print("query")
         print(query)
         print("context")
@@ -276,7 +278,7 @@ class Speller(nn.Module):
         prev_y = torch.zeros(batch_size, dtype=torch.long, device=seq_embeddings.device)
         prev_y[:] = SOS_TOKEN
         hx = None
-        self.attend_layer.set_mask(seq_embeddings, seq_embedding_lengths)
+        self.attend_layer.set_key_value(seq_embeddings, seq_embedding_lengths)
 
         prev_context, _ = self.attend_layer.forward(
             torch.zeros(
@@ -285,8 +287,6 @@ class Speller(nn.Module):
                 device=seq_embeddings.device,
                 dtype=seq_embeddings.dtype
             ),
-            seq_embeddings,
-            seq_embedding_lengths
         )
 
         output_logits_seq = []
@@ -294,7 +294,7 @@ class Speller(nn.Module):
         output_char_seq = None if self.training else []  # Output character-sequence when in validation mode.
         for i in range(1, max_decode_length):
             spell_out, hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
-            current_context, _ = self.attend_layer.forward(spell_out, seq_embeddings, seq_embedding_lengths)
+            current_context, _ = self.attend_layer.forward(spell_out)
             cdn_inputs = torch.concat([spell_out, current_context], dim=1)
             cdn_out_i = self.cdn.forward(cdn_inputs)  # (batch, output_size)
             output_logits_seq.append(cdn_out_i)
