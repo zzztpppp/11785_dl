@@ -111,7 +111,6 @@ class UnlabeledDataset(Dataset):
 def train_epoch(training_loader, model, criterion, optimizer, scaler, current_epoch, scheduler=None, tf_scheduler=None):
     total_training_loss = 0.0
     total_samples = 0
-    total_batches = len(training_loader)
     model.train()
     b = 0
     for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in tqdm(training_loader):

@@ -1,7 +1,7 @@
 import random
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import  pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torchaudio.transforms import FrequencyMasking, TimeMasking
 from torch.nn.functional import softmax, gumbel_softmax
 from phonetics import SOS_TOKEN
@@ -154,7 +154,7 @@ class Attention(nn.Module):
         mask = mask >= embedding_seq_lengths[:, None].to(embedding_seq.device)
         self._mask = mask
 
-    def _get_weights(self, query, embedding_seq, batch_seq_lengths):
+    def _get_weights(self, query, embedding_seq):
         # For each query in the batch, compute
         # its context.
         _, hidden_size = query.shape
@@ -180,7 +180,9 @@ class Attention(nn.Module):
 
         weights = self._get_weights(query, embedding_seq, batch_seq_lengths)
         context = torch.bmm(weights[:, None, :], self._value_mlp.forward(embedding_seq)).squeeze(1)
+        print("context")
         print(context)
+        print("weights")
         print(weights)
         return context, weights
 
@@ -263,7 +265,7 @@ class Speller(nn.Module):
             y_embeddings = self.char_embedding.forward(batch_prev_y)
 
         lstm_inputs = torch.concat([y_embeddings, prev_context], dim=1)
-        output, hx = self.decoder.forward(lstm_inputs[:, None, :])
+        output, hx = self.decoder.forward(lstm_inputs[:, None, :], hx)
         return output.squeeze(1), hx
 
     def forward(self, seq_embeddings, seq_embedding_lengths, batch_y=None, tf_rate=1.0):
@@ -289,7 +291,6 @@ class Speller(nn.Module):
         gumble = False
         output_char_seq = None if self.training else []  # Output character-sequence when in validation mode.
         for i in range(1, max_decode_length):
-            torch.cuda.empty_cache()
             spell_out, hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
             current_context, _ = self.attend_layer.forward(spell_out, seq_embeddings, seq_embedding_lengths)
             cdn_inputs = torch.concat([spell_out, current_context], dim=1)
