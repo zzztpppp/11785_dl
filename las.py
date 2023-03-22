@@ -251,14 +251,7 @@ class Speller(nn.Module):
             dropout=dropout
         )
 
-        self.transformation = nn.Sequential(
-            nn.Linear(self.context_size + embedding_size, embedding_size),
-            nn.ReLU()
-        )
-        self.cdn = nn.Linear(embedding_size, output_size)
-
-        # Weight tying
-        self.cdn.weight = self.char_embedding.weight
+        self.cdn = nn.Linear(self.context_size + embedding_size, output_size)
 
     def spell_step(self, batch_prev_y, hx, prev_context, gumble=False):
         if gumble:
@@ -314,7 +307,7 @@ class Speller(nn.Module):
             # Validation
             else:
                 gumble = False
-                prev_y = self.random_decode(cdn_out_i)
+                prev_y = self.greedy_decode(cdn_out_i)
                 output_char_seq.append(prev_y)
 
         if not self.training:
