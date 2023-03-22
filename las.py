@@ -175,6 +175,7 @@ class Attention(nn.Module):
         energy = energy.masked_fill(self._mask, filling_value)
         print("energy")
         print(energy)
+        print(softmax(energy, dim=1))
         weights = softmax(energy / torch.sqrt(torch.tensor(hidden_size)).to(query.device), dim=1)
 
         return weights
