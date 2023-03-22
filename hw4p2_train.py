@@ -122,11 +122,6 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
-        if scheduler is not None:
-            current_epoch = current_epoch + b / total_batches
-            scheduler.step(current_epoch)
-        if tf_scheduler is not None:
-            tf_scheduler.step()
         b += 1
 
     training_loss = "Training loss ", total_training_loss / total_samples
