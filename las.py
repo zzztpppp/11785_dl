@@ -167,15 +167,15 @@ class Attention(nn.Module):
             self._query_mlp.forward(query)[:, :, None]
         )  # (B, T, 1)
 
-        print("query")
-        print(query)
+        # print("query")
+        # print(query)
 
         energy = energy.squeeze(2)  # (B, T)
         filling_value = -1e+30 if energy.dtype == torch.float32 else -1e+4
         energy = energy.masked_fill(self._mask, filling_value)
-        print("energy")
-        print(energy)
-        print(softmax(energy, dim=1))
+        # print("energy")
+        # print(energy)
+        # print(softmax(energy, dim=1))
         weights = softmax(energy / torch.sqrt(torch.tensor(hidden_size)).to(query.device), dim=1)
 
         return weights
@@ -188,10 +188,10 @@ class Attention(nn.Module):
 
         weights = self._get_weights(query)
         context = torch.bmm(weights[:, None, :], self._value).squeeze(1)
-        print("context")
-        print(context)
-        print("weights")
-        print(weights)
+        # print("context")
+        # print(context)
+        # print("weights")
+        # print(weights)
         return context, weights
 
 
