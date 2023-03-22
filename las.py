@@ -178,7 +178,7 @@ class Attention(nn.Module):
         :return:
         """
 
-        weights = self._get_weights(query, embedding_seq, batch_seq_lengths)
+        weights = self._get_weights(query, embedding_seq)
         context = torch.bmm(weights[:, None, :], self._value_mlp.forward(embedding_seq)).squeeze(1)
         print("context")
         print(context)
