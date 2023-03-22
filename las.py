@@ -375,11 +375,11 @@ class LAS(nn.Module):
         self.tf_rate = teacher_force_rate
 
         # From the LAS paper. Weights are initialized by Uniform(-0.1, 0.1)
-        for param in self.listener.parameters():
-            torch.nn.init.uniform_(param, -0.1, 0.1)
-
-        for param in self.speller.parameters():
-            torch.nn.init.uniform_(param, -0.1, 0.1)
+        # for param in self.listener.parameters():
+        #     torch.nn.init.uniform_(param, -0.1, 0.1)
+        #
+        # for param in self.speller.parameters():
+        #     torch.nn.init.uniform_(param, -0.1, 0.1)
 
     def forward(self, seq_x, seq_lengths, seq_y=None):
         if self.training:
