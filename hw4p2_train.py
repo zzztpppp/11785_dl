@@ -291,6 +291,8 @@ def train_las(params: dict):
         val_loss, val_distance = validate(model, val_loader, True)
         if epoch > params["tf_freeze_steps"]:
             tf_scheduler.step()
+        if epoch % 5 == 0:
+            torch.save(model.state_dict(), "model_checkpoint")
         lr_scheduler.step()
         print(f"Validation loss: {val_loss}. validation_distance {val_distance}")
 
