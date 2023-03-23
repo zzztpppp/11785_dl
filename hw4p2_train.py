@@ -289,7 +289,8 @@ def train_las(params: dict):
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
         val_loss, val_distance = validate(model, val_loader, True)
-        tf_scheduler.step()
+        if epoch > params["tf_freeze_steps"]:
+            tf_scheduler.step()
         lr_scheduler.step()
         print(f"Validation loss: {val_loss}. validation_distance {val_distance}")
 
@@ -314,6 +315,7 @@ if __name__ == "__main__":
     parser.add_argument("--decoder_dropout", type=float, default=0.5)
     parser.add_argument("--time_mask", type=int, default=30)
     parser.add_argument("--frequency_mask", type=int, default=3)
+    parser.add_argument("--tf_freeze_steps", type=int, default=15)
     parser.add_argument("--tf_rate", type=float, default=1.0)
     parser.add_argument("--tf_step_size", type=int, default=2)
     parser.add_argument("--tf_reduce_rate", type=float, default=0.025)
