@@ -6,7 +6,7 @@ import argparse
 from phonetics import VOCAB
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from hw4p2_train import training_y_dir, dev_y_dir, device
 from las import Speller
 
@@ -67,15 +67,18 @@ def pretrain_forward(model, batch_x, batch_y, batch_lengths, criterion, pseudo_c
     batch_size, max_seq_length = batch_x.shape
     batch_x = batch_x.to(device)  # (B, L, V)
     batch_y = batch_y.to(device)
-
+    pseduo_context = pseudo_context.expand(batch_size, max_seq_length, model.context_size)
     batch_x_chars = model.char_embedding.forward(batch_x)  # (B, L, E)
     batch_x_chars = torch.cat([batch_x_chars,
-                               pseudo_context.expand(batch_size, max_seq_length, model.context_size)], dim=2)
+                               pseduo_context], dim=2)
     packed_batch_x = pack_padded_sequence(batch_x_chars, batch_lengths, batch_first=True, enforce_sorted=False)
     packed_lstm_out, _ = model.decoder.forward(packed_batch_x)
-    packed_batch_y_dist = model.cdn.forward(packed_lstm_out.data)
+    padded_lstm_out, _ = pad_packed_sequence(packed_lstm_out, batch_first=True)
+    padded_lstm_out = torch.cat([padded_lstm_out, pseudo_context], dim=2)
+    padded_y_dist = model.cdn.forward(padded_lstm_out)
     packed_batch_y = pack_padded_sequence(batch_y, batch_lengths, batch_first=True, enforce_sorted=False)
-    loss = criterion(packed_batch_y_dist, packed_batch_y.data)
+    packed_y_dist = pack_padded_sequence(padded_y_dist, batch_lengths, batch_first=True, enforce_sorted=False)
+    loss = criterion(packed_y_dist.data, packed_batch_y.data)
     return loss
 
 
