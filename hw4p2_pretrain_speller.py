@@ -6,8 +6,7 @@ import argparse
 from phonetics import VOCAB
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-from las import Speller
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from hw4p2_train import training_y_dir, dev_y_dir, device
 from las import Speller
 
@@ -44,7 +43,7 @@ def get_dataloader(data_root, path, **kwargs):
     return data_loader
 
 
-def pretrain_epoch(model: Speller, training_loader, criterion, optimizer, scaler):
+def pretrain_epoch(model: Speller, training_loader, criterion, optimizer):
     model.train()
     total_loss = 0.0
     total_samples = 0
@@ -105,13 +104,15 @@ def pretrain(params):
     val_loader = get_dataloader(data_root, dev_y_dir, num_workers=num_workers, batch_size=validation_batch_size)
     speller = Speller(
         embedding_size=params["embedding_size"],
-        output_size=len(VOCAB)
+        context_size=params["context_size"],
+        output_size=len(VOCAB),
+        dropout=params["dropout"]
     )
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(speller.parameters(), lr=0.01)
     n_epochs = params["n_epochs"]
     for epoch in range(n_epochs):
-        pretrain_epoch(speller, train_loader, criterion, optimizer, None)
+        pretrain_epoch(speller, train_loader, criterion, optimizer)
         validate(speller, validation_loader=val_loader, criterion=criterion)
 
     torch.save(speller.state_dict(), "pretrained_speller")
@@ -125,6 +126,8 @@ if __name__ == "__main__":
     parser.add_argument("--training_batch_size", type=int, default=32)
     parser.add_argument("--validation_batch_size", type=int, default=128)
     parser.add_argument("--embedding_size", type=int, default=512)
+    parser.add_argument("--context_size", type=int, default=128)
+    parser.add_argument("--dropout", type=float, default=0.5)
     args = parser.parse_args()
     pretrain(vars(args))
     print("done")
