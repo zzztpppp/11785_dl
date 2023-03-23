@@ -67,10 +67,10 @@ def pretrain_forward(model, batch_x, batch_y, batch_lengths, criterion, pseudo_c
     batch_size, max_seq_length = batch_x.shape
     batch_x = batch_x.to(device)  # (B, L, V)
     batch_y = batch_y.to(device)
-    pseduo_context = pseudo_context.expand(batch_size, max_seq_length, model.context_size)
+    pseudo_context = pseudo_context.expand(batch_size, max_seq_length, model.context_size)
     batch_x_chars = model.char_embedding.forward(batch_x)  # (B, L, E)
     batch_x_chars = torch.cat([batch_x_chars,
-                               pseduo_context], dim=2)
+                               pseudo_context], dim=2)
     packed_batch_x = pack_padded_sequence(batch_x_chars, batch_lengths, batch_first=True, enforce_sorted=False)
     packed_lstm_out, _ = model.decoder.forward(packed_batch_x)
     padded_lstm_out, _ = pad_packed_sequence(packed_lstm_out, batch_first=True)
