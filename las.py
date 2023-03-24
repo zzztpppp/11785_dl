@@ -295,6 +295,7 @@ class Speller(nn.Module):
         output_logits_seq = []
         gumble = False
         output_char_seq = None if self.training else []  # Output character-sequence when in validation mode.
+        output_seq_log_probs = None if self.training else []  # Output character-sequence when in validation mode.
         for i in range(1, max_decode_length):
             spell_out, hx = self.spell_step(prev_y, hx, prev_context, gumble=gumble)
             current_context, _ = self.attend_layer.forward(spell_out)
@@ -314,23 +315,25 @@ class Speller(nn.Module):
             # Validation
             else:
                 gumble = False
-                prev_y = self.random_decode(cdn_out_i)
+                prev_y, log_prob = self.random_decode(cdn_out_i)
                 output_char_seq.append(prev_y)
-
+                output_seq_log_probs.append(log_prob)
         if not self.training:
             output_char_seq = torch.stack(output_char_seq, dim=1)
+            output_seq_log_probs = torch.stack(output_seq_log_probs, dim=1)
 
-        return torch.stack(output_logits_seq, dim=1), output_char_seq
+        return torch.stack(output_logits_seq, dim=1), (output_char_seq, output_seq_log_probs)
 
     @staticmethod
     def random_decode(cdn_out):
         probs = torch.softmax(cdn_out, dim=-1)
         samples = torch.multinomial(probs, 1).squeeze(-1)
-        return samples
+        return samples, torch.log(probs[:, samples])
 
     @staticmethod
     def greedy_decode(cdn_out):
-        return torch.argmax(cdn_out, dim=1)
+        samples = torch.argmax(cdn_out, dim=1)
+        return samples, torch.log_softmax(cdn_out, dim=-1)[:, samples]
 
 
 class LAS(nn.Module):

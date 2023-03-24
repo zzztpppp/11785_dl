@@ -45,6 +45,13 @@ def get_labeled_data_loader(data_root, x_dir, y_dir, **kwargs):
     return data_loader
 
 
+def get_unlabeled_dataloader(data_root, x_dir, **kwargs):
+    x_dir = os.path.join(data_root, x_dir)
+    dataset = UnlabeledDataset(x_dir)
+    dataloader = DataLoader(dataset, collate_fn=UnlabeledDataset.collate_fn, pin_memory=True, **kwargs)
+    return dataloader
+
+
 # Copied from hw3p2
 class LabeledDataset(Dataset):
     # load the dataset
@@ -207,6 +214,23 @@ def softmax_decode(batch_logits: torch.Tensor):
     probs = torch.nn.functional.softmax(batch_logits, dim=2)
     samples = torch.multinomial(probs.reshape(batch_size * max_length, -1), 1).reshape(batch_size, max_length)
     return samples
+
+
+def translate(batch_y_hat):
+    batch_y_hat_string = []
+    batch_y_hat_length = []
+    for y_hat in batch_y_hat:
+        y_hat_char = []
+        for char in y_hat:
+            if char == EOS_TOKEN:
+                break
+            y_hat_char.append(VOCAB[char])
+        y_hat_string = ''.join(y_hat_char)
+
+        batch_y_hat_string.append(y_hat_string)
+        batch_y_hat_length.append(len(y_hat_string))
+
+    return batch_y_hat_string, batch_y_hat_length
 
 
 def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
