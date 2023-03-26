@@ -3,7 +3,7 @@ import numpy as np
 from phonetics import SOS_TOKEN, EOS_TOKEN
 from hw4p2_train import test_x_dir, device, UnlabeledDataset
 from las import LAS
-from hw4p2_train import translate, get_unlabeled_dataloader, test_x_dir
+from hw4p2_train import translate, get_unlabeled_dataloader
 from phonetics import VOCAB
 
 
@@ -14,18 +14,20 @@ def beam_search(model: LAS, data_loader, beam_width):
 def sum_log_probs(batch_log_probs, output_lengths, normalize=False):
     _, max_length = batch_log_probs.shape
     output_lengths = torch.tensor(output_lengths)
-    mask = torch.arange(0, max_length)[None, :] >= torch.tensor(output_lengths)[:, None]
+    mask = torch.arange(0, max_length)[None, :] >= output_lengths[:, None]
     batch_log_probs = batch_log_probs.masked_fill(mask, 0)
     batch_total_log_probs = batch_log_probs.sum(dim=1)
     if normalize:
-        batch_total_log_probs = batch_log_probs / output_lengths
+        batch_total_log_probs = batch_total_log_probs / output_lengths
     return batch_total_log_probs
 
 
 def _pick(batch_output_seqs, batch_output_log_probs):
-    batch_n_strings = np.array(batch_output_seqs)
-    batch_n_probs = torch.stack(batch_output_log_probs).cpu().numpy()
-    return batch_n_strings[:, batch_n_probs.argmax(dim=1)]
+    batch_n_strings = np.array(batch_output_seqs).T  # (Batch, N_runs)
+    batch_size, _ = batch_n_strings.shape
+    print(batch_n_strings.shape)
+    batch_n_probs = torch.stack(batch_output_log_probs, dim=1).cpu().numpy()
+    return batch_n_strings[np.arange(0, batch_size), batch_n_probs.argmax(axis=1)]
 
 
 def random_search(model: LAS, data_loader, n_runs):
@@ -35,10 +37,8 @@ def random_search(model: LAS, data_loader, n_runs):
         for batch_x, seq_length in data_loader:
             seq_embeddings, seq_embedding_lengths = model.listener.forward(batch_x, seq_length)
             batch_output_seqs, batch_output_log_probs = [], []
-            for n in n_runs:
+            for _ in range(n_runs):
                 _, (output_seqs, output_log_probs) = model.speller.forward(seq_embeddings, seq_embedding_lengths)
-                batch_output_seqs.append(output_seqs)
-                batch_output_log_probs.append(output_log_probs)
 
                 y_hat_strings, y_hat_length = translate(output_seqs)
                 y_hat_string_log_probs = sum_log_probs(output_log_probs, y_hat_length, True)
@@ -50,7 +50,7 @@ def random_search(model: LAS, data_loader, n_runs):
 
 
 def inference(params):
-    model_checkpoint = params["model_checkpoint"]
+    model_checkpoint = params["model_path"]
     model = LAS(
         params["embedding_size"],
         params["context_size"],
@@ -66,7 +66,7 @@ def inference(params):
         params["data_root"],
         test_x_dir,
         batch_size=params["batch_size"],
-        num_workers=params["num_workers"],
+        num_workers=4,
         shuffle=False
     )
 
@@ -77,3 +77,21 @@ def inference(params):
     else:
         raise NotImplementedError()
 
+    print(predicted_strings)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("data_root", type=str)
+    parser.add_argument("mfcc_path", type=str)
+    parser.add_argument("model_path", type=str)
+    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--searching_method", type=str, default="random")
+    parser.add_argument("--n_runs", type=int, default=100, help="Number of random runs if searching method is random")
+    parser.add_argument("--num_dataloader_workers", type=int, default=2)
+    parser.add_argument("--embedding_size", type=int, default=512)
+    parser.add_argument("--context_size", type=int, default=512)
+    parser.add_argument("--plstm_layers", type=int, default=3)
+    args = parser.parse_args()
+    inference(vars(args))

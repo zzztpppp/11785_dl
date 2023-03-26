@@ -326,9 +326,10 @@ class Speller(nn.Module):
 
     @staticmethod
     def random_decode(cdn_out):
+        batch_size, _ = cdn_out.shape
         probs = torch.softmax(cdn_out, dim=-1)
-        samples = torch.multinomial(probs, 1).squeeze(-1)
-        return samples, torch.log(probs[:, samples])
+        samples = torch.multinomial(probs, 1).squeeze(1)
+        return samples, torch.log(probs[torch.arange(0, batch_size), samples])
 
     @staticmethod
     def greedy_decode(cdn_out):

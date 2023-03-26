@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import argparse
 import os
+import datetime as dt
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
@@ -111,7 +112,7 @@ class UnlabeledDataset(Dataset):
     @staticmethod
     def collate_fn(batch):
         batch_x = [torch.tensor(x) for (x, _) in batch]
-        batch_seq_lengths = [l for (_, l) in batch]
+        batch_seq_lengths = torch.IntTensor([l for (_, l) in batch])
         return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
 
