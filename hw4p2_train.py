@@ -116,6 +116,24 @@ class UnlabeledDataset(Dataset):
         return pad_sequence(batch_x, batch_first=True), batch_seq_lengths
 
 
+def translate(batch_y_hat):
+    batch_y_hat_length = []
+    batch_size, max_length = batch_y_hat.shape
+    batch_y_hat = batch_y_hat.detach().cpu().numpy()
+    char_array = np.zeros_like(batch_y_hat, dtype='U1')
+    for i in range(batch_size):
+        length = 0
+        for j in range(max_length):
+            if batch_y_hat[i, j] == EOS_TOKEN:
+                length = j
+                break
+            char_array[i, j] = VOCAB[batch_y_hat[i, j]]
+        batch_y_hat_length.append(length)
+
+    batch_y_hat_string = char_array.view(f"U{max_length}")
+    return batch_y_hat_string, batch_y_hat_length
+
+
 def train_epoch(training_loader, model, criterion, optimizer, scaler, current_epoch, scheduler=None, tf_scheduler=None):
     total_training_loss = 0.0
     total_samples = 0
@@ -135,6 +153,48 @@ def train_epoch(training_loader, model, criterion, optimizer, scaler, current_ep
 
     training_loss = "Training loss ", total_training_loss / total_samples
     print(training_loss)
+
+
+def sum_log_probs(batch_log_probs, output_lengths, normalize=False):
+    _, max_length = batch_log_probs.shape
+    output_lengths = torch.tensor(output_lengths, device=device)
+    mask = torch.arange(0, max_length)[None, :].to(device) >= output_lengths[:, None]
+    batch_log_probs = batch_log_probs.masked_fill(mask, 0)
+    batch_total_log_probs = batch_log_probs.sum(dim=1)
+    if normalize:
+        batch_total_log_probs = batch_total_log_probs / output_lengths
+    return batch_total_log_probs
+
+
+def _pick(batch_output_seqs, batch_output_log_probs):
+    batch_size, n_runs = batch_output_seqs.shape
+    batch_n_probs = batch_output_log_probs.cpu().numpy().reshape(batch_size, n_runs)
+    return batch_output_seqs[np.arange(0, batch_size), batch_n_probs.argmax(axis=1)]
+
+
+def random_search(model: LAS, batch_x, seq_length, n_runs):
+    model.eval()
+    all_strings = []
+    model = model.to(device)
+    with torch.inference_mode():
+        batch_x = batch_x.to(device)
+        batch_size, _, _ = batch_x.shape
+        seq_embeddings, seq_embedding_lengths = model.listener.forward(batch_x, seq_length)
+        # Randomly decode n times
+        seq_embeddings_n_runs = torch.tile(seq_embeddings, (n_runs, 1, 1))
+        seq_embedding_lengths_n_runs = torch.tile(seq_embedding_lengths, (n_runs, ))
+        _, (output_seqs_n, output_log_probs_n) = model.speller.forward(
+            seq_embeddings_n_runs, seq_embedding_lengths_n_runs
+        )
+        print("Done forward")
+        batch_string_n, batch_string_length_n = translate(output_seqs_n)
+        print("Done translation")
+        batch_string_n = batch_string_n.reshape(batch_size, n_runs)
+        batch_log_probs_n_runs = sum_log_probs(output_log_probs_n, batch_string_length_n)
+        # Pick the one with the largest log prob.
+        all_strings.append(_pick(batch_string_n, batch_log_probs_n_runs))
+        print("Done pick")
+    return np.concatenate(all_strings)
 
 
 def labeled_forward(
@@ -177,7 +237,7 @@ def labeled_forward(
     return loss, batch_y_hat
 
 
-def validate(model: LAS, dev_loader, compute_distance=False) -> (float, float):
+def validate(model: LAS, dev_loader, compute_distance=False, n_runs=20) -> (float, float):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
@@ -187,10 +247,11 @@ def validate(model: LAS, dev_loader, compute_distance=False) -> (float, float):
     with torch.inference_mode():
         for (batch_x, batch_y), (batch_seq_lengths, batch_target_lengths) in dev_loader:
             batch_size = batch_y.shape[0]
-            loss, batch_y_hat = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths,
+            loss, _ = labeled_forward(model, criterion, batch_x, batch_y, batch_seq_lengths,
                                                 batch_target_lengths, True)
+            batch_y_string = random_search(model, batch_x, batch_seq_lengths, n_runs)
             if compute_distance:
-                distance = levenshtein_distance(batch_y_hat, batch_y, batch_target_lengths)
+                distance = levenshtein_distance(batch_y_string, batch_y, batch_target_lengths)
                 total_distance = total_distance + distance
 
             total_loss = total_loss + batch_size * float(loss)
@@ -217,34 +278,11 @@ def softmax_decode(batch_logits: torch.Tensor):
     return samples
 
 
-def translate(batch_y_hat):
-    batch_y_hat_string = []
-    batch_y_hat_length = []
-    for y_hat in batch_y_hat:
-        y_hat_char = []
-        for char in y_hat:
-            if char == EOS_TOKEN:
-                break
-            y_hat_char.append(VOCAB[char])
-        y_hat_string = ''.join(y_hat_char)
-
-        batch_y_hat_string.append(y_hat_string)
-        batch_y_hat_length.append(len(y_hat_string))
-
-    return batch_y_hat_string, batch_y_hat_length
-
-
 def levenshtein_distance(batch_y_hat, batch_y, batch_lengths):
     total_distance = 0.0
     sample_y_string, sample_y_hat_string = None, None
-    for y_hat, y, length in zip(batch_y_hat, batch_y, batch_lengths):
+    for y_hat_string, y, length in zip(batch_y_hat, batch_y, batch_lengths):
         y_string = ''.join([VOCAB[char] for char in y[1:length - 1]])  # Remove <sos> and <eos>
-        y_hat_char = []
-        for char in y_hat:
-            if char == EOS_TOKEN:
-                break
-            y_hat_char.append(VOCAB[char])
-        y_hat_string = ''.join(y_hat_char)
 
         # For print
         sample_y_string, sample_y_hat_string = y_string, y_hat_string
@@ -282,6 +320,11 @@ def train_las(params: dict):
     if pretrained_speller_path is not None:
         print(f"Load pretrained speller {pretrained_speller_path}")
         model.speller.load_state_dict(torch.load(pretrained_speller_path))
+
+    resume_from = params["resume_from"]
+    if resume_from is not None:
+        print(f"Load model checkpoint {resume_from}")
+        model.load_state_dict(torch.load(resume_from))
 
     print(params)
     print(model)
@@ -328,6 +371,7 @@ if __name__ == "__main__":
     parser.add_argument("data_root", type=str)
     parser.add_argument("--pretrained_listener_path", type=str, default=None)
     parser.add_argument("--pretrained_speller_path", type=str, default=None)
+    parser.add_argument("--resume_from", type=str, default=None)
     parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
