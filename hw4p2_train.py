@@ -181,8 +181,8 @@ def random_search(model: LAS, batch_x, seq_length, n_runs):
         batch_size, _, _ = batch_x.shape
         seq_embeddings, seq_embedding_lengths = model.listener.forward(batch_x, seq_length)
         # Randomly decode n times
-        seq_embeddings_n_runs = torch.tile(seq_embeddings, (n_runs, 1, 1))
-        seq_embedding_lengths_n_runs = torch.tile(seq_embedding_lengths, (n_runs, ))
+        seq_embeddings_n_runs = torch.repeat_interleave(seq_embeddings, n_runs, 0)
+        seq_embedding_lengths_n_runs = torch.repeat_interleave(seq_embedding_lengths, n_runs)
         _, (output_seqs_n, output_log_probs_n) = model.speller.forward(
             seq_embeddings_n_runs, seq_embedding_lengths_n_runs
         )
@@ -190,7 +190,7 @@ def random_search(model: LAS, batch_x, seq_length, n_runs):
         batch_string_n, batch_string_length_n = translate(output_seqs_n)
         print("Done translation")
         batch_string_n = batch_string_n.reshape(batch_size, n_runs)
-        batch_log_probs_n_runs = sum_log_probs(output_log_probs_n, batch_string_length_n)
+        batch_log_probs_n_runs = sum_log_probs(output_log_probs_n, batch_string_length_n, True)
         # Pick the one with the largest log prob.
         all_strings.append(_pick(batch_string_n, batch_log_probs_n_runs))
         print("Done pick")
@@ -237,7 +237,7 @@ def labeled_forward(
     return loss, batch_y_hat
 
 
-def validate(model: LAS, dev_loader, compute_distance=False, n_runs=20) -> (float, float):
+def validate(model: LAS, dev_loader, n_runs, compute_distance=False) -> (float, float):
     model.eval()
     model = model.to(device)
     total_loss = 0.0
@@ -347,7 +347,7 @@ def train_las(params: dict):
         batch_size=params["validation_batch_size"],
         num_workers=num_workers
     )
-
+    validation_width = params["validation_width"]
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params["weight_decay"])
     criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler()
@@ -356,7 +356,7 @@ def train_las(params: dict):
     # model = torch.compile(model)
     for epoch in range(n_epochs):
         train_epoch(training_loader, model, criterion, optimizer, scaler, epoch)
-        val_loss, val_distance = validate(model, val_loader, True)
+        val_loss, val_distance = validate(model, val_loader, validation_width, True)
         if epoch > params["tf_freeze_steps"]:
             tf_scheduler.step()
         if epoch % 5 == 0:
@@ -376,6 +376,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_dataloader_workers", type=int, default=2)
     parser.add_argument("--training_batch_size", type=int, default=32)
     parser.add_argument("--validation_batch_size", type=int, default=512)
+    parser.add_argument("--validation_width", type=int, default=5)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--lr_step_size", type=int, default=1)
     parser.add_argument("--weight_decay", type=float, default=0.0)
