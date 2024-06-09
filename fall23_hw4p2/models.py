@@ -158,7 +158,7 @@ class TransformerListener(torch.nn.Module):
         )
 
         # compute the postion encoding
-        self.positional_encoding = PositionalEncoding(listener_hidden_size, max_seq_len=1024)
+        self.positional_encoding = PositionalEncoding(listener_hidden_size, max_seq_len=2048)
 
         # create a sequence of transformer blocks
         self.transformer_encoder = torch.nn.ModuleList()
