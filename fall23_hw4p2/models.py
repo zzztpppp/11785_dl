@@ -396,7 +396,7 @@ class Speller(torch.nn.Module):
             raw_pred = self.cdn(cdn_input)  # call CDN with cdn_input
 
             # Generate next output-embedding with gumble-softmax trick
-            char_embed = torch.nn.functional.gumbel_softmax(raw_pred, tau=0.1, dim=1).matmul(self.embedding.weight)
+            char_embed = torch.nn.functional.gumbel_softmax(raw_pred, tau=0.1, dim=1, hard=True).matmul(self.embedding.weight)
 
             raw_outputs.append(raw_pred)  # for loss calculation
             attention_plot.append(attn_weights)  # for plotting attention plot
