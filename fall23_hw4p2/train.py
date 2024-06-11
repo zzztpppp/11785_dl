@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils import data
 
-from hw_kaggle.fall23_hw4p2.utils import DEVICE
+from utils import DEVICE
 from models import ASRModel
 from utils import VOCAB, VOCAB_MAP, calc_edit_distance, SOS_TOKEN, EOS_TOKEN, indices_to_chars
 from torchsummary import summary
