@@ -166,7 +166,7 @@ def get_test_dataloader(data_root, cepstral):
 
 
 def get_dataloaders(config):
-    DATA_DIR = r'D:\code\cmu11785\hw_kaggle\fall23_hw4p2\data'
+    DATA_DIR = config["data_root"]
     PARTITION = config['train_dataset']
     CEPSTRAL = config['cepstral_norm']
 
