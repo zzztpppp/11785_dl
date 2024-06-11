@@ -250,6 +250,8 @@ def experiment(config):
             scheduled_tf_rate=scheduled_tf_rate,
             scheduled_lr=scheduled_lr,
             gradient_norm=config["gradient_norm"],
+            gumble=config["gumble"],
+            hard_gumble=config["hard_gumble"],
         )
         if (epoch + 1) % validation_period == 0:
             edit_distance = validate(model, valid_loader)
@@ -289,6 +291,8 @@ def train(
         scheduled_tf_rate,
         scheduled_lr,
         gradient_norm,
+        gumble,
+        hard_gumble,
 ):
     model.train()
     batch_bar = tqdm.tqdm(total=len(dataloader), dynamic_ncols=True, leave=True, position=0, desc='Train')
@@ -306,8 +310,8 @@ def train(
 
         x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx, ly
         with torch.cuda.amp.autocast():
-            raw_predictions, attention_plot = model(x, lx, y=y, tf_rate=teacher_forcing_rate)
-
+            raw_predictions, attention_plot = model(x, lx, y=y, tf_rate=teacher_forcing_rate,
+                                                    gumble=gumble, hard_gumble=hard_gumble)
             # Predictions are of Shape (batch_size, timesteps, vocab_size).
             # Transcripts are of shape (batch_size, timesteps) Which means that you have batch_size amount of batches with timestep number of tokens.
             # So in total, you have batch_size*timesteps amount of characters.
@@ -431,6 +435,9 @@ def main():
         max_lr=5e-4,
         weight_decay=5e-3,
         gradient_norm=1,
+
+        gumble=False,
+        hard_gumble=False,
     )
     experiment(config)
     # output_result(config, None, None)
