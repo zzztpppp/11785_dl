@@ -7,6 +7,7 @@ import torch
 import tqdm
 # imports for decoding and distance calculation
 import wandb
+from torchaudio.transforms import TimeMasking, FrequencyMasking
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_sequence
@@ -32,6 +33,7 @@ class SpeechDatasetME(torch.utils.data.Dataset):  # Memory efficient
         self.cepstral = cepstral
         mfcc_dir_template = os.path.join(root, "{partition}", "mfcc")
         transcript_dir_template = os.path.join(root, "{partition}", "transcripts")
+        self.transforms = transforms
         if partition == "train-clean-100" or partition == "train-clean-360":
             mfcc_dir = mfcc_dir_template.format(partition=partition)
             transcript_dir = transcript_dir_template.format(partition=partition)
@@ -80,7 +82,13 @@ class SpeechDatasetME(torch.utils.data.Dataset):  # Memory efficient
             mfcc = cmvn(mfcc, variance_normalization=True)
         transcript_mapped = [VOCAB_MAP[x] for x in transcript]
 
-        return torch.FloatTensor(mfcc), torch.LongTensor(transcript_mapped)
+        mfcc = torch.FloatTensor(mfcc)
+        transcript = torch.LongTensor(transcript_mapped)
+
+        if self.transforms is not None:
+            mfcc = self.transforms(mfcc.transpose(0, 1)).transpose(0, 1)
+        return mfcc, transcript
+
 
     @staticmethod
     def collate_fn(batch):
@@ -169,11 +177,15 @@ def get_dataloaders(config):
     DATA_DIR = config["data_root"]
     PARTITION = config['train_dataset']
     CEPSTRAL = config['cepstral_norm']
-
+    training_transforms = nn.Sequential(
+        TimeMasking(config["time_mask_param"], p=config["time_mask_p"]),
+        FrequencyMasking(config["freq_mask_param"]),
+    )
     train_dataset = SpeechDatasetME(  # Or AudioDatasetME
         root=DATA_DIR,
         partition=PARTITION,
-        cepstral=CEPSTRAL
+        cepstral=CEPSTRAL,
+        transforms=training_transforms,
     )
     valid_dataset = SpeechDatasetME(
         root=DATA_DIR,
@@ -422,9 +434,15 @@ def main():
         batch_size=96,
         n_epochs=100,
         cepstral_norm=True,
+
         # Teacher forcing
         min_tf_rate=0.3,
         max_tf_rate=1.0,
+
+        # Data augmentation
+        time_mask_param=30,
+        freq_mask_param=10,
+        time_mask_p=0.3,
 
         # Model size
         hidden_size=512,
