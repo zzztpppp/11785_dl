@@ -353,7 +353,7 @@ class Speller(torch.nn.Module):
         inputs = self.char_prob(inputs)
         return inputs
 
-    def forward(self, batch_size, y=None, teacher_forcing_ratio=1):
+    def forward(self, batch_size, y=None, teacher_forcing_ratio=1, gumble=False, hard_gumble=False):
 
         raw_outputs = []
         attention_plot = []
@@ -396,7 +396,10 @@ class Speller(torch.nn.Module):
             raw_pred = self.cdn(cdn_input)  # call CDN with cdn_input
 
             # Generate next output-embedding with gumble-softmax trick
-            char_embed = torch.nn.functional.gumbel_softmax(raw_pred, tau=0.1, dim=1, hard=True).matmul(self.embedding.weight)
+            if gumble:
+                char_embed = torch.nn.functional.gumbel_softmax(raw_pred, tau=0.1, dim=1, hard=hard_gumble).matmul(self.embedding.weight)
+            else:
+                char_embed = self.embedding.forward(raw_pred.argmax(dim=1))
 
             raw_outputs.append(raw_pred)  # for loss calculation
             attention_plot.append(attn_weights)  # for plotting attention plot
@@ -420,7 +423,7 @@ class ASRModel(torch.nn.Module):
         self.attend = Attention(hidden_size, hidden_size, projection_size=hidden_size)
         self.speller = Speller(self.attend, embedding_size=hidden_size, voc_size=voc_size, n_lstm_layers=3)
 
-    def forward(self, x, lx, y=None, tf_rate=1):
+    def forward(self, x, lx, y=None, tf_rate=1, gumble=False, hard_gumble=False):
         # Encode speech features
         encoder_outputs, _ = self.listener(x, lx)
 

@@ -7,12 +7,13 @@ import torch
 import tqdm
 # imports for decoding and distance calculation
 import wandb
+from torchaudio.transforms import TimeMasking, FrequencyMasking
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils import data
 
-from hw_kaggle.fall23_hw4p2.utils import DEVICE
+from utils import DEVICE
 from models import ASRModel
 from utils import VOCAB, VOCAB_MAP, calc_edit_distance, SOS_TOKEN, EOS_TOKEN, indices_to_chars
 from torchsummary import summary
@@ -32,6 +33,7 @@ class SpeechDatasetME(torch.utils.data.Dataset):  # Memory efficient
         self.cepstral = cepstral
         mfcc_dir_template = os.path.join(root, "{partition}", "mfcc")
         transcript_dir_template = os.path.join(root, "{partition}", "transcripts")
+        self.transforms = transforms
         if partition == "train-clean-100" or partition == "train-clean-360":
             mfcc_dir = mfcc_dir_template.format(partition=partition)
             transcript_dir = transcript_dir_template.format(partition=partition)
@@ -80,7 +82,13 @@ class SpeechDatasetME(torch.utils.data.Dataset):  # Memory efficient
             mfcc = cmvn(mfcc, variance_normalization=True)
         transcript_mapped = [VOCAB_MAP[x] for x in transcript]
 
-        return torch.FloatTensor(mfcc), torch.LongTensor(transcript_mapped)
+        mfcc = torch.FloatTensor(mfcc)
+        transcript = torch.LongTensor(transcript_mapped)
+
+        if self.transforms is not None:
+            mfcc = self.transforms(mfcc.transpose(0, 1)).transpose(0, 1)
+        return mfcc, transcript
+
 
     @staticmethod
     def collate_fn(batch):
@@ -166,14 +174,18 @@ def get_test_dataloader(data_root, cepstral):
 
 
 def get_dataloaders(config):
-    DATA_DIR = r'D:\code\cmu11785\hw_kaggle\fall23_hw4p2\data'
+    DATA_DIR = config["data_root"]
     PARTITION = config['train_dataset']
     CEPSTRAL = config['cepstral_norm']
-
+    training_transforms = nn.Sequential(
+        TimeMasking(config["time_mask_param"], p=config["time_mask_p"]),
+        FrequencyMasking(config["freq_mask_param"]),
+    )
     train_dataset = SpeechDatasetME(  # Or AudioDatasetME
         root=DATA_DIR,
         partition=PARTITION,
-        cepstral=CEPSTRAL
+        cepstral=CEPSTRAL,
+        transforms=training_transforms,
     )
     valid_dataset = SpeechDatasetME(
         root=DATA_DIR,
@@ -250,6 +262,8 @@ def experiment(config):
             scheduled_tf_rate=scheduled_tf_rate,
             scheduled_lr=scheduled_lr,
             gradient_norm=config["gradient_norm"],
+            gumble=config["gumble"],
+            hard_gumble=config["hard_gumble"],
         )
         if (epoch + 1) % validation_period == 0:
             edit_distance = validate(model, valid_loader)
@@ -289,6 +303,8 @@ def train(
         scheduled_tf_rate,
         scheduled_lr,
         gradient_norm,
+        gumble,
+        hard_gumble,
 ):
     model.train()
     batch_bar = tqdm.tqdm(total=len(dataloader), dynamic_ncols=True, leave=True, position=0, desc='Train')
@@ -306,8 +322,8 @@ def train(
 
         x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx, ly
         with torch.cuda.amp.autocast():
-            raw_predictions, attention_plot = model(x, lx, y=y, tf_rate=teacher_forcing_rate)
-
+            raw_predictions, attention_plot = model(x, lx, y=y, tf_rate=teacher_forcing_rate,
+                                                    gumble=gumble, hard_gumble=hard_gumble)
             # Predictions are of Shape (batch_size, timesteps, vocab_size).
             # Transcripts are of shape (batch_size, timesteps) Which means that you have batch_size amount of batches with timestep number of tokens.
             # So in total, you have batch_size*timesteps amount of characters.
@@ -418,9 +434,15 @@ def main():
         batch_size=96,
         n_epochs=100,
         cepstral_norm=True,
+
         # Teacher forcing
         min_tf_rate=0.3,
         max_tf_rate=1.0,
+
+        # Data augmentation
+        time_mask_param=30,
+        freq_mask_param=10,
+        time_mask_p=0.3,
 
         # Model size
         hidden_size=512,
@@ -431,6 +453,9 @@ def main():
         max_lr=5e-4,
         weight_decay=5e-3,
         gradient_norm=1,
+
+        gumble=False,
+        hard_gumble=False,
     )
     experiment(config)
     # output_result(config, None, None)
