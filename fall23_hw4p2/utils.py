@@ -1,3 +1,4 @@
+import typing
 from typing import List
 
 import Levenshtein
@@ -6,7 +7,9 @@ import seaborn as sns
 import torch
 import numpy as np
 import math
-from models import ASRModel
+
+if typing.TYPE_CHECKING:
+    from models import ASRModel
 
 VOCAB = [
     '<pad>', '<sos>', '<eos>',
@@ -94,17 +97,17 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
-def beam_search(beam_with: int, model: ASRModel, x: torch.Tensor):
+def beam_search(beam_with: int, model: 'ASRModel', x: torch.Tensor, x_len: int):
     model.eval()
     max_len = 600
     listener = model.listener
     speller = model.speller
     attender = model.attend
-    sequence_embedding = listener(x)
+    sequence_embedding, _ = listener(x, x_len)
     attender.set_key_value(sequence_embedding)
     embedding_size = speller.embedding_size
     # log-probs, current sequence, attention_context, hidden_states, is-ended
-    beams = [[0.0, [SOS_TOKEN], torch.zeros(size=(embedding_size,)).to(DEVICE), [], False]]
+    beams = [[0.0,  [SOS_TOKEN], torch.zeros(size=(1, embedding_size)).to(DEVICE), [], False]]
     finished_paths = []
     # Beam search
     for t in range(max_len):
@@ -115,19 +118,20 @@ def beam_search(beam_with: int, model: ASRModel, x: torch.Tensor):
                 finished_paths.append(path)
             else:
                 with torch.inference_mode():
-                    char_embedding = attender(path[1][-1])
-                    lstm_input = torch.concat([char_embedding, path[2]])
+                    char_embedding = speller.embedding(torch.ones(size=(1, ), dtype=torch.long).to(DEVICE) * path[1][-1])
+                    lstm_input = torch.concat([char_embedding, path[2]], dim=1)
                     hidden_state_t = speller.lstm_step(lstm_input, path[3])
                     path[3].append(hidden_state_t)
-                    context = attender.compute_context(hidden_state_t[-1][0])
-                    cdn_input = torch.concat([hidden_state_t[-1][0], context])
+                    context, _ = attender.compute_context(hidden_state_t[-1][0])
+                    cdn_input = torch.concat([hidden_state_t[-1][0], context], dim=1)
                     raw_pred = speller.cdn(cdn_input)
-                    log_probs = torch.nn.functional.log_softmax(raw_pred, dim=-1)
-                candidate_tokens = torch.argsort(log_probs)[:beam_with]
+                    log_probs = torch.nn.functional.log_softmax(raw_pred, dim=-1).squeeze(0)
+                candidate_tokens = torch.argsort(log_probs, descending=True)[:beam_with]
                 for token in candidate_tokens:
+                    path[1].append(token.item())
                     new_path = [
-                        path[0] + log_probs[token],
-                        path[1].append(token),
+                        path[0] + log_probs[token].item(),
+                        path[1],
                         context,
                         [hidden_state_t],
                         False,
@@ -137,6 +141,6 @@ def beam_search(beam_with: int, model: ASRModel, x: torch.Tensor):
         if len(beams) == 0:
             break
 
-    result = max(finished_paths, key=lambda p: p[0])
+    result = max(finished_paths, key=lambda p: p[0])[1]
 
-    return indices_to_chars(result, VOCAB)
+    return result
