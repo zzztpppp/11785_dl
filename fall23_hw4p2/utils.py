@@ -108,39 +108,40 @@ def beam_search(beam_with: int, model: 'ASRModel', x: torch.Tensor, x_len: int):
     embedding_size = speller.embedding_size
     # log-probs, current sequence, attention_context, hidden_states, is-ended
     beams = [[0.0,  [SOS_TOKEN], torch.zeros(size=(1, embedding_size)).to(DEVICE), [], False]]
-    finished_paths = []
     # Beam search
     for t in range(max_len):
         new_beams = []
-        for path in beams:
-            if path[1][-1] == EOS_TOKEN:
-                path[-1] = True
-                finished_paths.append(path)
+        for sequence_log_prob, token_list, context, hidden_states, is_end in beams:
+            if token_list[-1] == EOS_TOKEN:
+                is_end = True
+                new_beams.append([sequence_log_prob, token_list, context, hidden_states, is_end])
             else:
                 with torch.inference_mode():
-                    char_embedding = speller.embedding(torch.ones(size=(1, ), dtype=torch.long).to(DEVICE) * path[1][-1])
-                    lstm_input = torch.concat([char_embedding, path[2]], dim=1)
-                    hidden_state_t = speller.lstm_step(lstm_input, path[3])
-                    path[3].append(hidden_state_t)
+                    char_embedding = speller.embedding(
+                        torch.ones(size=(1, ), dtype=torch.long).to(DEVICE) * token_list[-1]
+                    )
+                    lstm_input = torch.concat([char_embedding, context], dim=1)
+                    hidden_state_t = speller.lstm_step(lstm_input, hidden_states)
                     context, _ = attender.compute_context(hidden_state_t[-1][0])
                     cdn_input = torch.concat([hidden_state_t[-1][0], context], dim=1)
                     raw_pred = speller.cdn(cdn_input)
                     log_probs = torch.nn.functional.log_softmax(raw_pred, dim=-1).squeeze(0)
                 candidate_tokens = torch.argsort(log_probs, descending=True)[:beam_with]
                 for token in candidate_tokens:
-                    path[1].append(token.item())
+                    token_list = token_list.copy()
+                    token_list.append(token.item())
                     new_path = [
-                        path[0] + log_probs[token].item(),
-                        path[1],
+                        sequence_log_prob + log_probs[token].item(),
+                        token_list,
                         context,
                         [hidden_state_t],
                         False,
                     ]
                     new_beams.append(new_path)
-            beams = sorted(new_beams, key=lambda p: p[0], reverse=True)[:beam_with]
-        if len(beams) == 0:
+        beams = sorted(new_beams, key=lambda p: p[0], reverse=True)[:beam_with]
+        if all([p[-1] for p in beams]):
             break
 
-    result = max(finished_paths, key=lambda p: p[0])[1]
+    result = max(beams, key=lambda p: p[0])[1]
 
     return result
