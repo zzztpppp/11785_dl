@@ -76,6 +76,8 @@ class SpeechDatasetME(torch.utils.data.Dataset):  # Memory efficient
         # Load the mfcc and transcripts from the mfcc and transcript paths created earlier
         mfcc = np.load(self.mfcc_files[ind], allow_pickle=True)
         transcript = np.load(self.transcript_files[ind], allow_pickle=True)
+        # Remove <sos> token
+        transcript = transcript[1:]
 
         # Normalize the mfccs and map the transcripts to integers
         if self.cepstral:
@@ -88,7 +90,6 @@ class SpeechDatasetME(torch.utils.data.Dataset):  # Memory efficient
         if self.transforms is not None:
             mfcc = self.transforms(mfcc.transpose(0, 1)).transpose(0, 1)
         return mfcc, transcript
-
 
     @staticmethod
     def collate_fn(batch):
@@ -155,7 +156,7 @@ class SpeechDatasetTest(torch.utils.data.Dataset):
         return batch_x_pad, torch.tensor(lengths_x)
 
 
-def get_test_dataloader(data_root, cepstral):
+def get_test_dataloader(data_root, cepstral, batch_size=256):
     test_dataset = SpeechDatasetTest(
         root=data_root,
         partition='test-clean',
@@ -164,7 +165,7 @@ def get_test_dataloader(data_root, cepstral):
 
     test_loader = torch.utils.data.DataLoader(
         dataset=test_dataset,
-        batch_size=1,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=8,
         pin_memory=True,
@@ -388,7 +389,9 @@ def validate(model, dataloader):
             # Calculate Levenshtein Distance
             # running_lev_dist += calc_edit_distance(greedy_predictions, y, ly, VOCAB, print_example=False)
             # You can use print_example = True for one specific index i in your batches if you want
-            futures.append(executor.submit(calc_edit_distance, greedy_predictions.cpu().numpy(), y.cpu().numpy(), ly, VOCAB, print_example=False))
+            futures.append(
+                executor.submit(calc_edit_distance, greedy_predictions.cpu().numpy(), y.cpu().numpy(), ly, VOCAB,
+                                print_example=False))
             # batch_bar.set_postfix(
             #     dist="{:.04f}".format(running_lev_dist / (i + 1)))
             batch_bar.update()
@@ -406,23 +409,29 @@ def output_result(config, model, dataloader):
         static_dict = torch.load("ckpt.pth")["model_state_dict"]
         model.load_state_dict(static_dict)
     if dataloader is None:
-        dataloader = get_test_dataloader(config["data_root"], config["cepstral_norm"])
+        dataloader = get_test_dataloader(config["data_root"], config["cepstral_norm"], batch_size=256)
 
     model.eval()
     model.to(DEVICE)
     all_predictions = []
+    all_predictions_greedy = []
     for i, (x, lx) in enumerate(dataloader):
         x, lx = x.to(DEVICE), lx
-        # # Greedy Decoding
-        # with torch.inference_mode():
-        #     raw_predictions, attentions = model(x, lx, y=None)
-        # greedy_predictions = raw_predictions.argmax(dim=2)
-        # all_predictions.extend(greedy_predictions.cpu().tolist())
+        # Greedy Decoding
+        with torch.inference_mode():
+            raw_predictions, attentions = model(x, lx, y=None)
+        greedy_predictions = raw_predictions.argmax(dim=2)
+        all_predictions_greedy.extend(greedy_predictions.cpu().tolist())
 
-        # Beam search decoding
-        prediction = beam_search(1, model, x, lx)
-        all_predictions.append(prediction)
+    # Reset batch-size
+    # dataloader = get_test_dataloader(config["data_root"], config["cepstral_norm"], batch_size=1)
+    # for i, (x, lx) in enumerate(dataloader):
+    #     x, lx = x.to(DEVICE), lx
+    #     # Beam search decoding
+    #     prediction = beam_search(1, model, x, lx)
+    #     all_predictions.append(prediction)
 
+    all_predictions = all_predictions_greedy
     all_prediction_strings = ["".join(indices_to_chars(x, VOCAB)) for x in all_predictions]
     with open("hw4p2.csv", "w+") as f:
         f.write("index,label\n")
@@ -461,8 +470,8 @@ def main():
         gumble=False,
         hard_gumble=False,
     )
-    # experiment(config)
-    output_result(config, None, None)
+    experiment(config)
+    # output_result(config, None, None)
 
 
 if __name__ == "__main__":

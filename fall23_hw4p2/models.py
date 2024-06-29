@@ -270,8 +270,9 @@ class Attention(nn.Module):
         self._projection_size = projection_size
         self._key = None
         self._value = None
+        self._key_mask = None
 
-    def set_key_value(self, encoder_outputs):
+    def set_key_value(self, encoder_outputs, output_lengths):
         """
         In this function we take the encoder embeddings and make key and values from it.
         key.shape   = (batch_size, timesteps, projection_size)
@@ -279,6 +280,8 @@ class Attention(nn.Module):
         """
         self._key = self._kw.forward(encoder_outputs)
         self._value = self._vw.forward(encoder_outputs)
+        _, max_length, _ = encoder_outputs.shape
+        self._key_mask = (output_lengths[:, None] < torch.arange(max_length)[None, :]).to(DEVICE)
 
     def compute_context(self, decoder_context):
         """
@@ -300,7 +303,15 @@ class Attention(nn.Module):
         # #What will be the shape of raw_weights?
 
         # attention_weights = #What makes raw_weights -> attention_weights
-        attention_weights = torch.softmax(raw_weights, dim=1)
+        fill_value = torch.finfo(raw_weights.dtype).min
+        attention_weights = torch.softmax(
+            torch.masked_fill(
+                raw_weights,
+                mask=self._key_mask[..., None],
+                value=fill_value
+            ),
+            dim=1
+        )
 
         attention_context = (attention_weights * self._value).sum(dim=1)
 
@@ -425,11 +436,11 @@ class ASRModel(torch.nn.Module):
 
     def forward(self, x, lx, y=None, tf_rate=1, gumble=False, hard_gumble=False):
         # Encode speech features
-        encoder_outputs, _ = self.listener(x, lx)
+        encoder_outputs, output_lengths = self.listener(x, lx)
 
         # We want to compute keys and values ahead of the decoding step, as they are constant for all timesteps
         # Set keys and values using the encoder outputs
-        self.attend.set_key_value(encoder_outputs)
+        self.attend.set_key_value(encoder_outputs, output_lengths)
 
         # Decode text with the speller using context from the attention
         raw_outputs, attention_plots = self.speller(batch_size=x.shape[0], y=y, teacher_forcing_ratio=tf_rate)
