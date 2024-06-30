@@ -199,9 +199,9 @@ class TransformerListener(torch.nn.Module):
 class MultiHeadAttention(nn.Module):
     def __init__(self, projection_size, num_heads):
         super().__init__()
-        self._kw = nn.Linear(projection_size, projection_size)
-        self._vw = nn.Linear(projection_size, projection_size)
-        self._qw = nn.Linear(projection_size, projection_size)
+        self._kw = nn.Linear(projection_size, projection_size, bias=False)
+        self._vw = nn.Linear(projection_size, projection_size, bias=False)
+        self._qw = nn.Linear(projection_size, projection_size, bias=False)
         self._num_heads = num_heads
 
     def forward(self, key, value, query, key_padding_mask):
@@ -264,9 +264,9 @@ class Attention(nn.Module):
             projection_size,
     ):
         super().__init__()
-        self._vw = nn.Linear(listener_hidden_size, projection_size)
-        self._kw = nn.Linear(listener_hidden_size, projection_size)
-        self._qw = nn.Linear(speller_hidden_size, projection_size)
+        self._vw = nn.Linear(listener_hidden_size, projection_size, bias=False)
+        self._kw = nn.Linear(listener_hidden_size, projection_size, bias=False)
+        self._qw = nn.Linear(speller_hidden_size, projection_size, bias=False)
         self._projection_size = projection_size
         self._key = None
         self._value = None
