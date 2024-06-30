@@ -285,9 +285,8 @@ def experiment(config):
                         "epoch": epoch,
                         "val_distance": best_val_distance,
                     },
-                    "ckpt.pth"
+                    os.path.join(wandb.run.dir, "ckpt.pth")
                 )
-                wandb.save("best_ckpt.pth")
 
     plot_attention(attention_plot.mean(dim=0)[:, :, 0].detach().cpu())
     run.finish()
@@ -312,7 +311,7 @@ def train(
 
     running_loss = 0.0
     running_perplexity = 0.0
-
+    # model = torch.compile(model)
     for i, (x, y, lx, ly) in enumerate(dataloader):
         optimizer.zero_grad()
         global_steps = current_epoch * steps_per_epoch + i
@@ -453,9 +452,9 @@ def main():
         max_tf_rate=1.0,
 
         # Data augmentation
-        time_mask_param=30,
-        freq_mask_param=10,
-        time_mask_p=0.3,
+        time_mask_param=0,
+        freq_mask_param=0,
+        time_mask_p=0,
 
         # Model size
         hidden_size=512,
