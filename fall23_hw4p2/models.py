@@ -304,14 +304,15 @@ class Attention(nn.Module):
 
         # attention_weights = #What makes raw_weights -> attention_weights
         fill_value = torch.finfo(raw_weights.dtype).min
-        attention_weights = torch.softmax(
-            torch.masked_fill(
-                raw_weights,
-                mask=self._key_mask[..., None],
-                value=fill_value
-            ),
-            dim=1
-        )
+        with torch.cuda.amp.autocast(enabled=False):    # Prevent from fp16 overflow.
+            attention_weights = torch.softmax(
+                torch.masked_fill(
+                    raw_weights,
+                    mask=self._key_mask[..., None],
+                    value=fill_value
+                ),
+                dim=1
+            )
 
         attention_context = (attention_weights * self._value).sum(dim=1)
 
