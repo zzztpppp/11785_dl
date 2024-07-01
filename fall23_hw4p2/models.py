@@ -6,6 +6,16 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from utils import SOS_TOKEN, DEVICE
 
 
+class ChannelFirstLayerNorm(nn.Module):
+    def __init__(self, feature_size):
+        super().__init__()
+        self._layer_norm = nn.LayerNorm(feature_size)
+
+    def forward(self, x):
+        assert len(x.shape) == 3
+        return self._layer_norm(x.transpose(1, 2)).transpose(1, 2)
+
+
 class ResidualBlock1D(torch.nn.Module):
     """"
     Residual block that makes up the embedding layer
@@ -20,14 +30,14 @@ class ResidualBlock1D(torch.nn.Module):
             nn.ReLU(),
             nn.Conv1d(in_channels=output_channels, out_channels=output_channels, kernel_size=kernel_size, stride=1,
                       padding=(kernel_size - 1) // 2),
-            nn.BatchNorm1d(output_channels)
+            ChannelFirstLayerNorm(output_channels)
         )
 
         # Transform the input to match the size of the output
         if stride != 1 or input_channels != output_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv1d(in_channels=input_channels, out_channels=output_channels, kernel_size=1, stride=stride),
-                nn.BatchNorm1d(output_channels)
+                ChannelFirstLayerNorm(output_channels)
             )
         else:
             self.shortcut = nn.Identity()
@@ -91,9 +101,12 @@ class TransformerEncoder(torch.nn.Module):
         # Compute multihead attention. You are free to use the version provided by pytorch
         # self.attention = nn.MultiheadAttention(projection_size, num_heads=num_heads, batch_first=True)
         self.attention = MultiHeadAttention(projection_size, num_heads)
-        self.bn1 = nn.BatchNorm1d(projection_size)
+        # self.bn1 = nn.BatchNorm1d(projection_size)
+        #
+        # self.bn2 = nn.BatchNorm1d(projection_size)
 
-        self.bn2 = nn.BatchNorm1d(projection_size)
+        self.ln1 = nn.LayerNorm(projection_size)
+        self.ln2 = nn.LayerNorm(projection_size)
 
         # Feed forward neural network
         self.mlp = nn.Sequential(
@@ -115,13 +128,13 @@ class TransformerEncoder(torch.nn.Module):
         # Create a residual connection between the input and the output of the attention module
         out1 = out1 + x
         # Apply batch norm to out1
-        out1 = self.bn1.forward(out1.transpose(1, 2)).transpose(1, 2)
+        out1 = self.ln1.forward(out1)
         # Apply the output of the feed forward network
         out2 = self.mlp(out1)
         # Apply a residual connection between the input and output of the  FFN
         out2 = out2 + out1
         # Apply batch norm to the output
-        out2 = self.bn2(out2.transpose(1, 2)).transpose(1, 2)
+        out2 = self.ln2(out2)
 
         return out2
 
