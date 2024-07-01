@@ -85,7 +85,12 @@ class PositionalEncoding(torch.nn.Module):
 
 
 class TransformerEncoder(torch.nn.Module):
-    def __init__(self, projection_size, num_heads):
+    def __init__(
+            self,
+            projection_size,
+            num_heads,
+            dropout,
+    ):
         super().__init__()
 
         # create the key, query and value weights
@@ -100,11 +105,11 @@ class TransformerEncoder(torch.nn.Module):
 
         # Compute multihead attention. You are free to use the version provided by pytorch
         # self.attention = nn.MultiheadAttention(projection_size, num_heads=num_heads, batch_first=True)
-        self.attention = MultiHeadAttention(projection_size, num_heads)
+        self.attention = MultiHeadAttention(projection_size, num_heads, dropout=dropout)
         # self.bn1 = nn.BatchNorm1d(projection_size)
         #
         # self.bn2 = nn.BatchNorm1d(projection_size)
-
+        self._dropout = nn.Dropout(p=dropout)
         self.ln1 = nn.LayerNorm(projection_size)
         self.ln2 = nn.LayerNorm(projection_size)
 
@@ -131,6 +136,8 @@ class TransformerEncoder(torch.nn.Module):
         out1 = self.ln1.forward(out1)
         # Apply the output of the feed forward network
         out2 = self.mlp(out1)
+        out2 = self._dropout(out2)
+
         # Apply a residual connection between the input and output of the  FFN
         out2 = out2 + out1
         # Apply batch norm to the output
@@ -143,12 +150,14 @@ class TransformerListener(torch.nn.Module):
 
     def __init__(self,
                  input_size,
+                 dropout,
                  base_lstm_layers=1,
                  seq_embedding_layers=1,
                  pblstm_layers=1,
                  listener_hidden_size=256,
                  n_heads=8,
-                 tf_blocks=1):
+                 tf_blocks=1
+                 ):
         super().__init__()
 
         lstm_output_size = listener_hidden_size // (2 * (2 ** seq_embedding_layers))
@@ -158,6 +167,7 @@ class TransformerListener(torch.nn.Module):
             lstm_output_size,
             batch_first=True,
             bidirectional=True,
+            dropout=dropout
         )
 
         self._downsample_factor = (2 ** seq_embedding_layers)
@@ -177,7 +187,7 @@ class TransformerListener(torch.nn.Module):
         self.transformer_encoder = torch.nn.ModuleList()
         for i in range(tf_blocks):
             self.transformer_encoder.append(
-                TransformerEncoder(listener_hidden_size, num_heads=n_heads),
+                TransformerEncoder(listener_hidden_size, num_heads=n_heads, dropout=dropout),
             )
 
     def forward(self, x, x_len):
@@ -210,12 +220,18 @@ class TransformerListener(torch.nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, projection_size, num_heads):
+    def __init__(
+            self,
+            projection_size,
+            num_heads,
+            dropout,
+    ):
         super().__init__()
         self._kw = nn.Linear(projection_size, projection_size, bias=False)
         self._vw = nn.Linear(projection_size, projection_size, bias=False)
         self._qw = nn.Linear(projection_size, projection_size, bias=False)
         self._num_heads = num_heads
+        self._dropout = nn.Dropout(p=dropout)
 
     def forward(self, key, value, query, key_padding_mask):
         """
@@ -251,7 +267,7 @@ class MultiHeadAttention(nn.Module):
         # if weights.isnan().any():
         #     print(torch.norm(query_heads, dim=-1))
         #     print(weights)
-
+        weights = self._dropout(weights)
         result = torch.matmul(weights, value_heads.transpose(1, 2))\
             .transpose(1, 2)\
             .reshape(batch_size, key_length, -1)  # (B, KL,  H, P/H)
@@ -275,6 +291,7 @@ class Attention(nn.Module):
             listener_hidden_size,
             speller_hidden_size,
             projection_size,
+            dropout,
     ):
         super().__init__()
         self._vw = nn.Linear(listener_hidden_size, projection_size, bias=False)
@@ -284,6 +301,7 @@ class Attention(nn.Module):
         self._key = None
         self._value = None
         self._key_mask = None
+        self._dropout = nn.Dropout(p=dropout)
 
     def set_key_value(self, encoder_outputs, output_lengths):
         """
@@ -326,7 +344,7 @@ class Attention(nn.Module):
                 ),
                 dim=1
             )
-
+        attention_weights = self._dropout(attention_weights)
         attention_context = (attention_weights * self._value).sum(dim=1)
 
         return attention_context, attention_weights
@@ -337,7 +355,7 @@ class Speller(torch.nn.Module):
     # Refer to your HW4P1 implementation for help with setting up the language model.
     # The only thing you need to implement on top of your HW4P1 model is the attention module and teacher forcing.
 
-    def __init__(self, attender: Attention, embedding_size, voc_size, n_lstm_layers):
+    def __init__(self, attender: Attention, embedding_size, voc_size, n_lstm_layers, dropout):
         super().__init__()
 
         self.embedding_size = embedding_size
@@ -350,7 +368,7 @@ class Speller(torch.nn.Module):
         self.lstm_cells = nn.ModuleList()
         for i in range(n_lstm_layers):
             self.lstm_cells.append(nn.LSTMCell(embedding_size, embedding_size))
-
+        self._dropout = nn.Dropout(p=dropout)
         # For CDN (Feel free to change)
         self.output_to_char = nn.Linear(2 * embedding_size,
                                         embedding_size)  # Linear module to convert outputs to correct hidden size (Optional: TO make dimensions match)
@@ -368,11 +386,13 @@ class Speller(torch.nn.Module):
         # to the next cell.
         for i in range(len(self.lstm_cells)):
             input_stats, hidden_state = self.lstm_cells[i].forward(input_stats, hidden_state_list[-1][i])
+            input_stats = self._dropout(input_stats)
             hidden_state_t.append((input_stats, hidden_state))
         return hidden_state_t
 
     def cdn(self, inputs):
         # Make the CDN here, you can add the output-to-char
+        inputs = self._dropout(inputs)
         inputs = self.output_to_char(inputs)
         inputs = self.activation(inputs)
         inputs = self.char_prob(inputs)
@@ -436,17 +456,24 @@ class Speller(torch.nn.Module):
 
 
 class ASRModel(torch.nn.Module):
-    def __init__(self, input_size, hidden_size, voc_size, seq_embedding_layers):  # add parameters
+    def __init__(self, input_size, hidden_size, voc_size, seq_embedding_layers, dropout):  # add parameters
         super().__init__()
 
         # Pass the right parameters here
         self.listener = TransformerListener(
             input_size=input_size,
             listener_hidden_size=hidden_size,
-            seq_embedding_layers=seq_embedding_layers
+            seq_embedding_layers=seq_embedding_layers,
+            dropout=dropout,
         )
-        self.attend = Attention(hidden_size, hidden_size, projection_size=hidden_size)
-        self.speller = Speller(self.attend, embedding_size=hidden_size, voc_size=voc_size, n_lstm_layers=3)
+        self.attend = Attention(hidden_size, hidden_size, projection_size=hidden_size, dropout=dropout)
+        self.speller = Speller(
+            self.attend,
+            embedding_size=hidden_size,
+            voc_size=voc_size,
+            n_lstm_layers=3,
+            dropout=dropout,
+        )
 
     def forward(self, x, lx, y=None, tf_rate=1, gumble=False, hard_gumble=False):
         # Encode speech features

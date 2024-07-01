@@ -219,7 +219,7 @@ def get_dataloaders(config):
 def experiment(config):
     wandb.login(key="d9064f7e7a933b775df41f6fbd3d2ed5a1050d27")
     run = wandb.init(
-        name="las",  ## Wandb creates random run names if you skip this field
+        name="las-no-bias-ln",  ## Wandb creates random run names if you skip this field
         reinit=True,  ### Allows reinitalizing runs when you re-run this cell
         # id="izphf5f0",### Insert specific run id here if you want to resume a previous run
         # resume = "must", ### You need this to resume previous runs, but comment out reinit = True when using this
@@ -229,7 +229,13 @@ def experiment(config):
 
     train_loader, valid_loader, test_loader = get_dataloaders(config)
 
-    model = ASRModel(28, config["hidden_size"], voc_size=len(VOCAB), seq_embedding_layers=config["seq_embed_layers"])
+    model = ASRModel(
+        28,
+        config["hidden_size"],
+        voc_size=len(VOCAB),
+        seq_embedding_layers=config["seq_embed_layers"],
+        dropout=config["dropout"]
+    )
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=config["weight_decay"])
     scaler = torch.cuda.amp.GradScaler()
@@ -464,6 +470,7 @@ def main():
         min_lr=1e-6,
         max_lr=5e-4,
         weight_decay=5e-3,
+        dropout=0.2,
         gradient_norm=1,
 
         gumble=False,
