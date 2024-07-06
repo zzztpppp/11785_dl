@@ -127,13 +127,9 @@ class TransformerEncoder(torch.nn.Module):
         query = self._qw.forward(x)
 
         # compute the output of the attention module
-        out1 = self.attention.forward(
-            key=key,
-            value=value,
-            query=query,
-            key_lengths=lx,
-            query_lengths=lx,
-        )
+        max_length = lx.max()
+        key_padding_mask = ~(torch.arange(max_length)[None, :] < lx[:, None]).to(DEVICE)
+        out1, _ = self.attention.forward(key=key, value=value, query=query, key_padding_mask=key_padding_mask)
         # Create a residual connection between the input and the output of the attention module
         out1 = out1 + x
         # Apply batch norm to out1
@@ -237,7 +233,7 @@ class MultiHeadAttention(nn.Module):
         self._num_heads = num_heads
         self._dropout = nn.Dropout(p=dropout)
 
-    def forward(self, key, value, query, key_lengths, query_lengths):
+    def forward(self, key, value, query, key_padding_mask):
         """
         keys: (B, L, P)
         values: (B, L, P)
@@ -245,35 +241,37 @@ class MultiHeadAttention(nn.Module):
 
         returns: (B, P)
         """
-        batch_size, max_key_length, projection_size = key.shape
-        _, max_query_length, _ = query.shape
+        batch_size, key_length, projection_size = key.shape
+        _, query_length, _ = query.shape
         key_heads = self._kw.forward(
             key
-        ).reshape(batch_size, self._num_heads, max_key_length, -1) / (projection_size ** 0.5)
+        ).reshape(batch_size, key_length, self._num_heads, -1) / (projection_size ** 0.5)
 
         value_heads = self._vw.forward(
             value
-        ).reshape(batch_size,  self._num_heads, max_query_length, -1)  # (B, H, KL, P / H)
+        ).reshape(batch_size, query_length, self._num_heads, -1)  # (B, KL, H, P / H)
 
         query_heads = self._qw.forward(
             query
-        ).reshape(batch_size, self._num_heads, max_query_length, -1)  # (B, H, QL, P / H)
-
-        query_mask = torch.arange(0, max_query_length)[None, :] < query_lengths[:, None]
-        key_mask = torch.arange(0, max_key_length)[None, :] < key_lengths[:, None]
-        attn_mask = query_mask[:, :, None] & key_mask[:, None, :]
-
-        # Broadcast over head axis.
-        attn_mask = attn_mask[:, None, ...].to(key.device)
-        result = torch.nn.functional.scaled_dot_product_attention(
-            query=query_heads,
-            key=key_heads,
-            value=value_heads,
-            attn_mask=attn_mask
-        )
-        # Some queries attend to nothing, producing nan values.
-        result = result.reshape(batch_size, max_key_length, -1).nan_to_num()
-        return result
+        ).reshape(batch_size, query_length, self._num_heads, -1)  # (B, QL, H, P / H)
+        fill_value = torch.finfo(query_heads.dtype).min
+        with torch.cuda.amp.autocast(enabled=False):    # Prevent from fp16 overflow.
+            weights = torch.softmax(
+                torch.masked_fill(
+                    torch.einsum("bqhp, bkhp -> bhqk", query_heads.float(), key_heads.float()),
+                    mask=key_padding_mask[:, None, None, :],
+                    value=fill_value
+                ),
+                dim=-1
+            )
+        # if weights.isnan().any():
+        #     print(torch.norm(query_heads, dim=-1))
+        #     print(weights)
+        weights = self._dropout(weights)
+        result = torch.matmul(weights, value_heads.transpose(1, 2))\
+            .transpose(1, 2)\
+            .reshape(batch_size, key_length, -1)  # (B, KL,  H, P/H)
+        return result, weights
 
 
 class Attention(nn.Module):
