@@ -2,6 +2,7 @@ import random
 
 import torch.nn
 from torch import nn
+from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from utils import SOS_TOKEN, DEVICE
 
@@ -105,7 +106,8 @@ class TransformerEncoder(torch.nn.Module):
 
         # Compute multihead attention. You are free to use the version provided by pytorch
         # self.attention = nn.MultiheadAttention(projection_size, num_heads=num_heads, batch_first=True)
-        self.attention = MultiHeadAttention(projection_size, num_heads, dropout=dropout)
+        # self.attention = MultiHeadAttention(projection_size, num_heads, dropout=dropout)
+        self.attention = MultiHeadAttentionV2(projection_size=projection_size, num_heads=num_heads, dropout=dropout)
         # self.bn1 = nn.BatchNorm1d(projection_size)
         #
         # self.bn2 = nn.BatchNorm1d(projection_size)
@@ -128,8 +130,12 @@ class TransformerEncoder(torch.nn.Module):
 
         # compute the output of the attention module
         max_length = lx.max()
-        key_padding_mask = ~(torch.arange(max_length)[None, :] < lx[:, None]).to(DEVICE)
-        out1, _ = self.attention.forward(key=key, value=value, query=query, key_padding_mask=key_padding_mask)
+        key_padding_mask = (torch.arange(max_length)[None, :] < lx[:, None]).to(DEVICE)
+        value_padding_mask = (torch.arange(max_length)[None, :] < lx[:, None]).to(DEVICE)
+        attn_mask = (value_padding_mask[:, :, None] & key_padding_mask[:, None, :])[:, None, ...]
+        # Since padding values attend to nothing, it will cause problem in scaled-dot-product-attention
+        out1 = self.attention.forward(q=query, k=key, v=value, mask=key_padding_mask[:, None, None, :])
+        # out1, _ = self.attention.forward(query=query, key=key, value=value, key_padding_mask=key_padding_mask)
         # Create a residual connection between the input and the output of the attention module
         out1 = out1 + x
         # Apply batch norm to out1
@@ -219,6 +225,60 @@ class TransformerListener(torch.nn.Module):
         return output, output_lengths
 
 
+class ScaledDotProductAttention(nn.Module):
+    def __init__(self, dropout):
+        super().__init__()
+        self._dropout = dropout
+
+    def forward(self, q, k, v, mask):
+        dropout = 0.0
+        if self.training:
+            dropout = self._dropout
+        return scaled_dot_product_attention(query=q, key=k, value=v, attn_mask=mask, dropout_p=dropout)
+
+
+class MultiHeadAttentionV2(nn.Module):
+    """
+    Implement multi-head attention using pytorch's built-in flash-attention
+    """
+    def __init__(
+            self,
+            projection_size,
+            num_heads,
+            dropout,
+    ):
+        super().__init__()
+        assert projection_size % num_heads == 0
+
+        self._dropout_p = dropout
+        self._kw = nn.Linear(projection_size, projection_size, bias=False)
+        self._vw = nn.Linear(projection_size, projection_size, bias=False)
+        self._qw = nn.Linear(projection_size, projection_size, bias=False)
+        self._num_heads = num_heads
+
+    def forward(self, q, k, v, mask):
+        batch_size, key_length, _ = k.shape
+        _, query_length, _ = q.shape
+        q = self._qw.forward(q)\
+            .reshape(batch_size, query_length, self._num_heads, -1)
+        k = self._kw.forward(k)\
+            .reshape(batch_size, key_length, self._num_heads, -1)
+        v = self._vw.forward(v)\
+            .reshape(batch_size, key_length, self._num_heads, -1)  # Value length equals to key length
+
+        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)  # (B, H, L, P)
+        dropout_p = 0.0 if self.training else self._dropout_p
+        result = scaled_dot_product_attention(q, k, v, mask, dropout_p=dropout_p)  # (B, H, L, P)
+
+        # Concat the attention result of multiple heads
+        concatenated_attn = result.transpose(1, 2).reshape(batch_size, query_length, -1)
+
+        # Some positions in `query` are padded values, and they attend to nothing, this
+        # will cause nan values in the attention result, fill them out with 0s.
+        # return torch.nan_to_num(concatenated_attn)
+        return concatenated_attn
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(
             self,
@@ -291,6 +351,7 @@ class Attention(nn.Module):
             listener_hidden_size,
             speller_hidden_size,
             projection_size,
+            n_heads,
             dropout,
     ):
         super().__init__()
@@ -298,10 +359,11 @@ class Attention(nn.Module):
         self._kw = nn.Linear(listener_hidden_size, projection_size, bias=False)
         self._qw = nn.Linear(speller_hidden_size, projection_size, bias=False)
         self._projection_size = projection_size
+        self._n_heads = n_heads
         self._key = None
         self._value = None
         self._key_mask = None
-        self._dropout = nn.Dropout(p=dropout)
+        self._dropout = dropout
 
     def set_key_value(self, encoder_outputs, output_lengths):
         """
@@ -309,10 +371,12 @@ class Attention(nn.Module):
         key.shape   = (batch_size, timesteps, projection_size)
         value.shape = (batch_size, timesteps, projection_size)
         """
-        self._key = self._kw.forward(encoder_outputs)
-        self._value = self._vw.forward(encoder_outputs)
-        _, max_length, _ = encoder_outputs.shape
-        self._key_mask = (output_lengths[:, None] < torch.arange(max_length)[None, :]).to(DEVICE)
+        batch_size, max_length, _ = encoder_outputs.shape
+        self._key = self._kw.forward(encoder_outputs).reshape(batch_size, max_length, self._n_heads, -1)\
+            .transpose(1, 2)
+        self._value = self._vw.forward(encoder_outputs).reshape(batch_size, max_length, self._n_heads, -1)\
+            .transpose(1, 2)
+        self._key_mask = (torch.arange(max_length)[None, :] < output_lengths[:, None]).to(DEVICE)
 
     def compute_context(self, decoder_context):
         """
@@ -328,26 +392,19 @@ class Attention(nn.Module):
         You are also recomended to check out Abu's Lecture 19 to understand Attention better.
         """
         # query = QW(decoder_context) #(batch_size, projection_size)
-        query = self._qw.forward(decoder_context)[:, None, :].transpose(1, 2)
-        raw_weights = torch.matmul(self._key, query) / torch.sqrt(torch.tensor(self._projection_size, device=DEVICE))  # (B, L, 1)
-        # raw_weights = #using bmm or einsum. We need to perform batch matrix multiplication. It is important you do this step correctly.
-        # #What will be the shape of raw_weights?
+        batch_size, _ = decoder_context.shape
+        query = self._qw.forward(decoder_context)[:, None, :].reshape(batch_size, 1, self._n_heads, -1)\
+            .transpose(1, 2)
+        dropout_p = self._dropout if self.training else 0.0
+        attention_context = scaled_dot_product_attention(
+            query=query,
+            key=self._key,
+            value=self._value,
+            attn_mask=self._key_mask[:, None, None, :],
+            dropout_p=dropout_p,
+        ).unsqueeze(1).reshape(batch_size, -1)
 
-        # attention_weights = #What makes raw_weights -> attention_weights
-        fill_value = torch.finfo(raw_weights.dtype).min
-        with torch.cuda.amp.autocast(enabled=False):    # Prevent from fp16 overflow.
-            attention_weights = torch.softmax(
-                torch.masked_fill(
-                    raw_weights,
-                    mask=self._key_mask[..., None],
-                    value=fill_value
-                ),
-                dim=1
-            )
-        attention_weights = self._dropout(attention_weights)
-        attention_context = (attention_weights * self._value).sum(dim=1)
-
-        return attention_context, attention_weights
+        return attention_context, None
 
 
 class Speller(torch.nn.Module):
@@ -447,9 +504,7 @@ class Speller(torch.nn.Module):
                 char_embed = self.embedding.forward(raw_pred.argmax(dim=1))
 
             raw_outputs.append(raw_pred)  # for loss calculation
-            attention_plot.append(attn_weights)  # for plotting attention plot
 
-        attention_plot = torch.stack(attention_plot, dim=1)
         raw_outputs = torch.stack(raw_outputs, dim=1)
 
         return raw_outputs, attention_plot
@@ -466,7 +521,7 @@ class ASRModel(torch.nn.Module):
             seq_embedding_layers=seq_embedding_layers,
             dropout=dropout,
         )
-        self.attend = Attention(hidden_size, hidden_size, projection_size=hidden_size, dropout=dropout)
+        self.attend = Attention(hidden_size, hidden_size, projection_size=hidden_size, dropout=dropout, n_heads=8)
         self.speller = Speller(
             self.attend,
             embedding_size=hidden_size,
